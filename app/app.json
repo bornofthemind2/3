@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "Snap & Sell",
+    "slug": "snap-and-sell",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.snapandsell.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.snapandsell.app"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-sharing",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Snap & Sell needs your photos so you can add pictures of items you want to sell.",
+          "cameraPermission": "Snap & Sell uses the camera to photograph items you want to sell."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Snap & Sell needs your photos so you can add pictures of items you want to sell.",
+          "savePhotosPermission": "Snap & Sell saves listing photos to your library so marketplace apps can attach them.",
+          "isAccessMediaLocationEnabled": false
+        }
+      ]
+    ],
+    "scheme": "snapandsell",
+    "extra": {
+      "apiUrl": "",
+      "apiToken": ""
+    }
+  }
+}
