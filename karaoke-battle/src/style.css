@@ -1,0 +1,123 @@
+:root {
+  --bg: #0b0618;
+  --panel: #1a1033;
+  --text: #f5f3ff;
+  --muted: #a49cc4;
+  --accent: #ff3d9a;
+  --accent2: #22d3ee;
+  color-scheme: dark;
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+body {
+  background:
+    radial-gradient(1200px 600px at 10% -10%, #ff3d9a22, transparent 60%),
+    radial-gradient(1000px 600px at 110% 10%, #22d3ee1c, transparent 60%),
+    var(--bg);
+  background-attachment: fixed;
+  color: var(--text);
+  font-family: 'Nunito', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+.app {
+  padding: 20px 16px;
+  max-width: 1200px;
+  margin: 0 auto;
+  min-height: 100vh;
+}
+.panel {
+  background: var(--panel);
+  border-radius: 18px;
+  padding: 18px;
+  border: 1px solid #ffffff10;
+}
+.muted {
+  color: var(--muted);
+}
+.btn {
+  font: inherit;
+  font-weight: 800;
+  border: 0;
+  border-radius: 999px;
+  padding: 10px 20px;
+  cursor: pointer;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), #c026d3);
+  box-shadow: 0 6px 24px #ff3d9a44;
+  transition: transform 0.1s, box-shadow 0.15s, opacity 0.15s;
+}
+.btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px #ff3d9a66;
+}
+.btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.btn.big {
+  font-size: 1.15rem;
+  padding: 14px 28px;
+}
+.btn.small {
+  font-size: 0.85rem;
+  padding: 6px 14px;
+}
+.btn.ghost {
+  background: #ffffff10;
+  box-shadow: none;
+  border: 1px solid #ffffff22;
+}
+.btn.ghost:hover:not(:disabled) {
+  background: #ffffff1c;
+  box-shadow: none;
+}
+.btn:focus-visible,
+.seg:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent2);
+  outline-offset: 2px;
+}
+.seg {
+  font: inherit;
+  font-weight: 700;
+  padding: 7px 14px;
+  border-radius: 10px;
+  border: 1px solid #ffffff22;
+  background: #ffffff08;
+  color: var(--muted);
+  cursor: pointer;
+}
+.seg.on {
+  background: var(--accent2);
+  border-color: var(--accent2);
+  color: #0b0618;
+}
+input,
+select {
+  font: inherit;
+  color: var(--text);
+  background: #0b0618;
+  border: 1px solid #ffffff26;
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+.chip {
+  font-size: 0.75rem;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #ffffff14;
+  text-transform: capitalize;
+}
+.chip.gold {
+  background: #facc1533;
+  color: #facc15;
+}
