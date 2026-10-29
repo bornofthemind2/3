@@ -4,6 +4,7 @@ import { store, loadStats, clearStats } from '../game/battle.js'
 import { SONGS } from '../game/songs.js'
 
 const stats = ref(loadStats())
+const confirming = ref(false)
 const singers = computed(() =>
   Object.entries(stats.value.singers)
     .map(([name, s]) => ({ name, ...s }))
@@ -11,7 +12,12 @@ const singers = computed(() =>
 )
 
 function reset() {
-  if (!confirm('Erase all Hall of Fame records?')) return
+  // Two-step button instead of confirm(), which embedded viewers block.
+  if (!confirming.value) {
+    confirming.value = true
+    return
+  }
+  confirming.value = false
   clearStats()
   stats.value = loadStats()
 }
@@ -58,7 +64,7 @@ function reset() {
       </div>
     </section>
 
-    <div class="foot"><button class="btn small ghost" @click="reset">Reset records</button></div>
+    <div class="foot"><button class="btn small ghost" @click="reset">{{ confirming ? 'Click again to erase all records' : 'Reset records' }}</button></div>
   </div>
 </template>
 

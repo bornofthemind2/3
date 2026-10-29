@@ -10,9 +10,9 @@ import FinalResults from './components/FinalResults.vue'
 import HallOfFame from './components/HallOfFame.vue'
 import PracticeScreen from './components/PracticeScreen.vue'
 
+// Quitting a song mid-battle goes back to that turn's intro, where it can be restarted.
 function quitSong() {
-  if (confirm('Quit the battle? Progress will be lost.')) store.screen = 'home'
-  else store.screen = 'turn-intro'
+  store.screen = 'turn-intro'
 }
 </script>
 
