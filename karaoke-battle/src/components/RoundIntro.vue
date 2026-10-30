@@ -110,9 +110,11 @@ function spin() {
   align-items: center;
 }
 .round-no {
-  font-size: 2.6rem;
+  font-family: var(--font-display);
+  font-size: clamp(1.8rem, 7vw, 2.6rem);
   font-weight: 900;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
+  text-shadow: 0 0 30px var(--accent);
 }
 .round-no span {
   font-size: 1.2rem;
@@ -121,7 +123,7 @@ function spin() {
 .challenge {
   perspective: 900px;
   width: min(420px, 100%);
-  height: 190px;
+  height: clamp(150px, 26vh, 190px);
 }
 .flip {
   position: relative;
@@ -146,7 +148,9 @@ function spin() {
   text-align: center;
 }
 .back {
-  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  font-family: var(--font-display);
+  background: conic-gradient(from var(--angle), var(--accent), #b026ff, var(--accent2), var(--accent));
+  animation: spin-rim 3s linear infinite;
   font-size: 5rem;
   font-weight: 900;
 }
@@ -160,7 +164,8 @@ function spin() {
   font-size: 2.6rem;
 }
 .c-name {
-  font-size: 1.6rem;
+  font-family: var(--font-display);
+  font-size: clamp(1.2rem, 5vw, 1.6rem);
   font-weight: 900;
 }
 .c-desc {
@@ -188,9 +193,12 @@ function spin() {
   position: relative;
   text-align: left;
   padding: 16px;
-  border-radius: 16px;
-  border: 2px solid #ffffff14;
-  background: var(--panel);
+  min-height: 44px;
+  border-radius: 18px;
+  border: 1.5px solid var(--line);
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
   color: inherit;
   font: inherit;
   cursor: pointer;
@@ -199,9 +207,27 @@ function spin() {
   flex-direction: column;
   gap: 4px;
 }
-.song:hover:not(:disabled) {
-  transform: translateY(-3px);
-  border-color: var(--accent);
+@media (hover: hover) {
+  .song:hover:not(:disabled) {
+    transform: translateY(-3px);
+    border-color: var(--accent);
+    box-shadow: 0 10px 30px -12px var(--accent);
+  }
+}
+.song:active:not(:disabled) {
+  transform: scale(0.97);
+}
+@media (max-width: 520px) {
+  .songs {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .song {
+    padding: 12px 14px;
+  }
+  .pick-head .btn {
+    flex: 1;
+  }
 }
 .song:disabled {
   cursor: default;

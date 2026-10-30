@@ -39,12 +39,14 @@ function go() {
       <template v-else-if="singers[0].cpu">The CPU is warming up its circuits…</template>
       <template v-else>Pass the mic to {{ singers[0].name }}. Space pauses, Esc quits.</template>
     </p>
+    <div class="rings" aria-hidden="true" :style="{ '--c': singers[0].color }"><i></i><i></i><i></i></div>
     <button class="btn big" @click="go">{{ singers.every((s) => s.cpu) ? '▶ Watch' : '🎤 I\'m ready!' }}</button>
   </div>
 </template>
 
 <style scoped>
 .turn {
+  position: relative;
   text-align: center;
   display: flex;
   flex-direction: column;
@@ -66,7 +68,9 @@ function go() {
   letter-spacing: 0.2em;
 }
 .name {
-  font-size: clamp(2.5rem, 9vw, 5rem);
+  font-family: var(--font-display);
+  font-size: clamp(2.2rem, 10vw, 5rem);
+  overflow-wrap: anywhere;
   font-weight: 900;
   animation: zoom 0.5s cubic-bezier(0.3, 1.6, 0.5, 1);
 }
@@ -94,5 +98,45 @@ function go() {
 .hint {
   color: var(--muted);
   max-width: 460px;
+}
+.rings {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  z-index: -1;
+  pointer-events: none;
+}
+.rings i {
+  position: absolute;
+  width: 220px;
+  height: 220px;
+  margin: -110px;
+  border-radius: 50%;
+  border: 2px solid var(--c);
+  box-shadow: 0 0 30px var(--c), inset 0 0 30px var(--c);
+  animation: ring 2.4s ease-out infinite;
+  opacity: 0;
+}
+.rings i:nth-child(2) {
+  animation-delay: 0.8s;
+}
+.rings i:nth-child(3) {
+  animation-delay: 1.6s;
+}
+@keyframes ring {
+  0% {
+    transform: scale(0.3);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+@media (max-width: 640px) {
+  .turn .btn {
+    width: 100%;
+    max-width: 360px;
+  }
 }
 </style>

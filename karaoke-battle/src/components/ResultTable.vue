@@ -34,13 +34,16 @@ defineProps({
 }
 .row {
   display: grid;
-  grid-template-columns: 44px 1fr auto;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
   gap: 14px;
   align-items: center;
   padding: 14px 18px;
-  border-radius: 16px;
-  background: var(--panel);
-  border-left: 5px solid var(--c);
+  border-radius: 18px;
+  background: linear-gradient(100deg, color-mix(in srgb, var(--c) 20%, transparent), var(--glass) 45%);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--c);
   animation: slide 0.4s backwards;
 }
 @keyframes slide {
@@ -50,7 +53,8 @@ defineProps({
   }
 }
 .rank {
-  font-size: 1.6rem;
+  font-family: var(--font-display);
+  font-size: 1.5rem;
   font-weight: 900;
   color: var(--muted);
 }
@@ -90,17 +94,23 @@ defineProps({
 .miss {
   color: #f87171;
 }
+.row:first-child {
+  box-shadow: 0 0 34px -12px var(--c);
+}
 .score {
-  font-size: 1.8rem;
+  font-family: var(--font-display);
+  font-size: clamp(1.3rem, 5vw, 1.8rem);
   font-weight: 900;
   font-variant-numeric: tabular-nums;
 }
 @media (max-width: 520px) {
   .row {
-    grid-template-columns: 28px 1fr;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 12px 14px;
   }
-  .score {
-    grid-column: 2;
+  .stats {
+    font-size: 0.78rem;
   }
 }
 </style>

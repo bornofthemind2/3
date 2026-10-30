@@ -80,7 +80,7 @@ function done(res) {
   <div v-else class="practice result">
     <h2>{{ song.title }}</h2>
     <ResultTable :rows="[{ player, res: result }]" />
-    <div class="actions">
+    <div class="action-bar">
       <button class="btn big" @click="sing(song)">🔁 Sing again</button>
       <button class="btn big ghost" @click="phase = 'pick'">🎵 Another song</button>
     </div>
@@ -124,15 +124,23 @@ label {
 .song {
   text-align: left;
   padding: 16px;
-  border-radius: 16px;
-  border: 2px solid #ffffff14;
-  background: var(--panel);
+  border-radius: 18px;
+  border: 1.5px solid var(--line);
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  transition: transform 0.15s, border-color 0.2s;
   color: inherit;
   font: inherit;
   cursor: pointer;
 }
-.song:hover {
-  border-color: var(--accent);
+@media (hover: hover) {
+  .song:hover {
+    border-color: var(--accent);
+  }
+}
+.song:active {
+  transform: scale(0.97);
 }
 .s-title {
   font-weight: 800;

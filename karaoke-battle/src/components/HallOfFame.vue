@@ -34,7 +34,8 @@ function reset() {
     <section class="panel">
       <h3>Top singers</h3>
       <p v-if="!singers.length" class="muted">No battles yet. Go start one!</p>
-      <table v-else>
+      <div v-else class="scroll">
+      <table>
         <thead>
           <tr><th>#</th><th>Singer</th><th>Wins</th><th>Battles</th><th>Best round</th><th>Career points</th></tr>
         </thead>
@@ -49,6 +50,7 @@ function reset() {
           </tr>
         </tbody>
       </table>
+      </div>
     </section>
 
     <section class="panel">
@@ -87,6 +89,9 @@ h3 {
 }
 h3 {
   margin-bottom: 12px;
+}
+.scroll {
+  overflow-x: auto;
 }
 table {
   width: 100%;

@@ -76,6 +76,7 @@ function start() {
             <option v-for="l in CPU_LEVELS" :key="l.label" :value="l.skill">{{ l.label }}</option>
           </select>
           <button v-if="cfg.players.length > 2" class="remove" aria-label="Remove singer" @click="cfg.players.splice(i, 1)">✕</button>
+          <div class="avatar" aria-hidden="true">{{ p.cpu ? '🤖' : (p.name.trim()[0] || '?').toUpperCase() }}</div>
         </div>
         <button v-if="cfg.players.length < 6" class="add" @click="addPlayer">+ Add singer</button>
       </div>
@@ -117,7 +118,7 @@ function start() {
         </div>
         <h3>Challenges</h3>
         <select v-model="cfg.challengeMode" aria-label="Challenges">
-          <option value="random">🎲 Random each round (final round is Golden)</option>
+          <option value="random">🎲 Random each round (Golden finale)</option>
           <option value="off">Off — classic karaoke</option>
           <option v-for="c in CHALLENGES.slice(1)" :key="c.id" :value="c.id">Always {{ c.icon }} {{ c.name }}</option>
         </select>
@@ -129,7 +130,7 @@ function start() {
       </section>
     </div>
 
-    <div class="go">
+    <div class="action-bar">
       <button class="btn big" :disabled="!valid" @click="start">🎤 Start the battle</button>
     </div>
   </div>
@@ -165,23 +166,46 @@ h3:not(:first-child) {
 }
 .player {
   position: relative;
-  border-radius: 14px;
-  padding: 12px;
-  background: #ffffff08;
-  border: 2px solid var(--c);
+  border-radius: 18px;
+  padding: 14px;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--c) 18%, transparent), rgb(255 255 255 / 0.03));
+  border: 1.5px solid color-mix(in srgb, var(--c) 70%, transparent);
+  box-shadow: 0 0 30px -12px var(--c);
+  animation: pop-in 0.4s cubic-bezier(0.2, 1.5, 0.4, 1);
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
+@keyframes pop-in {
+  from {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+}
+.avatar {
+  position: absolute;
+  top: 12px;
+  right: 52px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 900;
+  background: var(--c);
+  color: #07030f;
+}
 .swatches {
   display: flex;
-  gap: 6px;
+  gap: 8px;
+  padding-right: 80px;
 }
 .sw {
-  width: 18px;
-  height: 18px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
   border: 2px solid transparent;
+  box-shadow: 0 0 10px -2px currentColor;
   padding: 0;
   cursor: pointer;
 }
@@ -192,10 +216,15 @@ h3:not(:first-child) {
   display: flex;
   gap: 6px;
 }
+.type .seg {
+  flex: 1;
+}
 .remove {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: 4px;
+  right: 4px;
+  width: 44px;
+  height: 44px;
   background: none;
   border: 0;
   color: var(--muted);
@@ -240,7 +269,8 @@ h3:not(:first-child) {
 }
 .card.on {
   border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: 0 0 30px -10px var(--accent);
 }
 .ci {
   font-size: 1.6rem;
@@ -258,9 +288,5 @@ h3:not(:first-child) {
 select {
   width: 100%;
 }
-.go {
-  display: flex;
-  justify-content: center;
-  padding: 10px 0 30px;
-}
+
 </style>

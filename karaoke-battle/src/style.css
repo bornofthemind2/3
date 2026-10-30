@@ -1,14 +1,33 @@
+/* Single deliberate look: a neon karaoke club at night.
+   Display type is wide and loud; body type is round and friendly. */
+@property --angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
 :root {
-  --bg: #0b0618;
-  --panel: #1a1033;
-  --text: #f5f3ff;
-  --muted: #a49cc4;
+  --bg: #07030f;
+  --glass: rgb(24 14 48 / 0.55);
+  --glass-strong: rgb(24 14 48 / 0.82);
+  --line: rgb(255 255 255 / 0.1);
+  --text: #f6f3ff;
+  --muted: #a99fcc;
   --accent: #ff3d9a;
   --accent2: #22d3ee;
+  --gold: #facc15;
+  --panel: var(--glass);
+  --font-display: 'Unbounded', 'Arial Black', system-ui, sans-serif;
+  --font-body: 'Nunito', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --gutter-l: max(16px, env(safe-area-inset-left, 0px));
+  --gutter-r: max(16px, env(safe-area-inset-right, 0px));
   color-scheme: dark;
 }
 * {
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
 }
 html,
 body {
@@ -16,68 +35,153 @@ body {
   min-height: 100%;
 }
 body {
-  background:
-    radial-gradient(1200px 600px at 10% -10%, #ff3d9a22, transparent 60%),
-    radial-gradient(1000px 600px at 110% 10%, #22d3ee1c, transparent 60%),
-    var(--bg);
+  background: radial-gradient(1200px 600px at 10% -10%, #ff3d9a26, transparent 60%), radial-gradient(1000px 600px at 110% 10%, #22d3ee1f, transparent 60%), var(--bg);
   background-attachment: fixed;
   color: var(--text);
-  font-family: 'Nunito', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-family: var(--font-body);
+  touch-action: manipulation;
+  overscroll-behavior-y: none;
 }
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+h2 {
+  font-size: clamp(1.3rem, 4.5vw, 1.8rem);
+}
+h3 {
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+/* WebGL backdrop + particle layers. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  opacity: 0;
+  transition: opacity 1.2s;
+}
+.backdrop.on {
+  opacity: 1;
+}
+.fx-particles {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 50;
+}
+
 .app {
-  padding: 20px 16px;
+  padding-block: calc(20px + var(--safe-t)) calc(24px + var(--safe-b));
+  padding-left: var(--gutter-l);
+  padding-right: var(--gutter-r);
   max-width: 1200px;
   margin: 0 auto;
-  min-height: 100vh;
+  min-height: 100dvh;
 }
+
 .panel {
-  background: var(--panel);
-  border-radius: 18px;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  backdrop-filter: blur(18px) saturate(150%);
+  border-radius: 20px;
   padding: 18px;
-  border: 1px solid #ffffff10;
+  border: 1px solid var(--line);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 20px 50px -20px rgb(0 0 0 / 0.6);
 }
 .muted {
   color: var(--muted);
 }
+
+/* Buttons: primary has a slowly spinning neon rim. */
 .btn {
+  --rim: conic-gradient(from var(--angle), var(--accent), var(--accent2), var(--gold), var(--accent));
+  position: relative;
+  isolation: isolate;
   font: inherit;
   font-weight: 800;
   border: 0;
   border-radius: 999px;
-  padding: 10px 20px;
+  min-height: 44px;
+  padding: 10px 22px;
   cursor: pointer;
   color: #fff;
-  background: linear-gradient(135deg, var(--accent), #c026d3);
-  box-shadow: 0 6px 24px #ff3d9a44;
-  transition: transform 0.1s, box-shadow 0.15s, opacity 0.15s;
+  background: linear-gradient(135deg, var(--accent), #b026ff);
+  box-shadow: 0 8px 28px -6px #ff3d9a88;
+  transition: transform 0.15s cubic-bezier(0.3, 1.6, 0.5, 1), box-shadow 0.2s, opacity 0.15s;
+  animation: spin-rim 4s linear infinite;
 }
-.btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 30px #ff3d9a66;
+.btn::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  background: var(--rim);
+  z-index: -1;
+  filter: blur(6px);
+  opacity: 0.55;
+}
+@keyframes spin-rim {
+  to {
+    --angle: 360deg;
+  }
+}
+@media (hover: hover) {
+  .btn:hover:not(:disabled) {
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: 0 14px 36px -6px #ff3d9aaa;
+  }
 }
 .btn:active:not(:disabled) {
-  transform: translateY(0);
+  transform: scale(0.96);
 }
 .btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
 .btn.big {
-  font-size: 1.15rem;
-  padding: 14px 28px;
+  font-size: 1.1rem;
+  padding: 14px 30px;
+  min-height: 54px;
 }
 .btn.small {
   font-size: 0.85rem;
-  padding: 6px 14px;
+  padding: 6px 16px;
+  min-height: 40px;
 }
 .btn.ghost {
-  background: #ffffff10;
+  background: rgb(255 255 255 / 0.07);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
   box-shadow: none;
-  border: 1px solid #ffffff22;
+  border: 1px solid rgb(255 255 255 / 0.16);
+  animation: none;
 }
-.btn.ghost:hover:not(:disabled) {
-  background: #ffffff1c;
-  box-shadow: none;
+.btn.ghost::before {
+  display: none;
+}
+@media (hover: hover) {
+  .btn.ghost:hover:not(:disabled) {
+    background: rgb(255 255 255 / 0.14);
+    box-shadow: none;
+  }
+}
+.btn.icon {
+  width: 46px;
+  height: 46px;
+  min-height: 46px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  font-size: 1.1rem;
 }
 .btn:focus-visible,
 .seg:focus-visible,
@@ -89,35 +193,116 @@ select:focus-visible {
 .seg {
   font: inherit;
   font-weight: 700;
-  padding: 7px 14px;
-  border-radius: 10px;
-  border: 1px solid #ffffff22;
-  background: #ffffff08;
+  min-height: 44px;
+  padding: 8px 16px;
+  border-radius: 12px;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  background: rgb(255 255 255 / 0.05);
   color: var(--muted);
   cursor: pointer;
+  transition: background 0.2s, color 0.2s, box-shadow 0.2s;
 }
 .seg.on {
   background: var(--accent2);
   border-color: var(--accent2);
-  color: #0b0618;
+  color: #07030f;
+  box-shadow: 0 0 22px -4px var(--accent2);
 }
 input,
 select {
   font: inherit;
+  font-size: 16px; /* stops iOS zooming on focus */
+  min-height: 44px;
   color: var(--text);
-  background: #0b0618;
-  border: 1px solid #ffffff26;
-  border-radius: 10px;
+  background: rgb(7 3 15 / 0.7);
+  border: 1px solid rgb(255 255 255 / 0.16);
+  border-radius: 12px;
   padding: 8px 12px;
 }
 .chip {
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   padding: 3px 10px;
   border-radius: 999px;
-  background: #ffffff14;
+  background: rgb(255 255 255 / 0.1);
   text-transform: capitalize;
+  white-space: nowrap;
 }
 .chip.gold {
   background: #facc1533;
-  color: #facc15;
+  color: var(--gold);
+}
+
+/* Gradient headline text that shimmers. */
+.shine {
+  background: linear-gradient(100deg, var(--accent) 0%, #fff 40%, var(--accent2) 60%, var(--accent) 100%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shine 6s linear infinite;
+}
+@keyframes shine {
+  to {
+    background-position: -250% 0;
+  }
+}
+
+/* Sticky action bar for the main call to action on phones. */
+.action-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 14px 0 calc(14px + var(--safe-b));
+  background: linear-gradient(transparent, var(--bg) 45%);
+}
+@media (max-width: 640px) {
+  .action-bar {
+    gap: 8px;
+  }
+  .action-bar .btn {
+    flex: 1 1 100%;
+  }
+  .action-bar .btn.ghost {
+    flex: 1 1 0;
+    min-width: 0;
+    font-size: 0.85rem;
+    padding: 8px 10px;
+    min-height: 46px;
+  }
+}
+
+/* Screen changes animate through the View Transitions API. */
+::view-transition-old(root) {
+  animation: vt-out 0.28s cubic-bezier(0.4, 0, 1, 1) both;
+}
+::view-transition-new(root) {
+  animation: vt-in 0.42s cubic-bezier(0, 0, 0.2, 1) both;
+}
+@keyframes vt-out {
+  to {
+    opacity: 0;
+    transform: scale(0.96);
+    filter: blur(8px);
+  }
+}
+@keyframes vt-in {
+  from {
+    opacity: 0;
+    transform: scale(1.04);
+    filter: blur(8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

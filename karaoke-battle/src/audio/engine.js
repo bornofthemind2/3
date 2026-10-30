@@ -4,10 +4,39 @@
 import { midiToFreq } from '../game/music.js'
 
 let ctx = null
+let master = null
+let analyser = null
+let levelBuf = null
 
 export function getAudioContext() {
   if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)()
   return ctx
+}
+
+// Everything audible goes through one master node with an analyser on it,
+// so visuals can react to the music.
+function getMaster() {
+  if (!master) {
+    const ac = getAudioContext()
+    master = ac.createGain()
+    analyser = ac.createAnalyser()
+    analyser.fftSize = 256
+    analyser.smoothingTimeConstant = 0.6
+    levelBuf = new Uint8Array(analyser.frequencyBinCount)
+    master.connect(analyser)
+    analyser.connect(ac.destination)
+  }
+  return master
+}
+
+/** Loudness of the bass/mid end of the current output, 0..1. */
+export function getLevel() {
+  if (!analyser || ctx.state !== 'running') return 0
+  analyser.getByteFrequencyData(levelBuf)
+  let sum = 0
+  const n = 24
+  for (let i = 1; i <= n; i++) sum += levelBuf[i]
+  return Math.min(1, (sum / n / 255) * 1.6)
 }
 
 function noiseBuffer(ac) {
@@ -36,7 +65,7 @@ export function playBacking(parsed, song, bars, opts = {}) {
   const bus = ac.createGain()
   bus.gain.value = opts.volume ?? 0.9
   const comp = ac.createDynamicsCompressor()
-  bus.connect(comp).connect(ac.destination)
+  bus.connect(comp).connect(getMaster())
 
   const guideBus = ac.createGain()
   guideBus.gain.value = opts.guide ?? 0.6
@@ -161,7 +190,7 @@ export function sfx(kind) {
     const g = ac.createGain()
     g.gain.setValueAtTime(0.06, t0 + off)
     g.gain.exponentialRampToValueAtTime(0.001, t0 + off + d)
-    osc.connect(g).connect(ac.destination)
+    osc.connect(g).connect(getMaster())
     osc.start(t0 + off)
     osc.stop(t0 + off + d + 0.02)
   }

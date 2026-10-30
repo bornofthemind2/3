@@ -3,6 +3,7 @@ import { computed, onMounted } from 'vue'
 import { store, nextRound, standings } from '../game/battle.js'
 import { sfx } from '../audio/engine.js'
 import ResultTable from './ResultTable.vue'
+import { burst } from '../fx/particles.js'
 
 const b = store.battle
 const r = b.round
@@ -14,7 +15,10 @@ const totals = computed(() => standings(b))
 const maxTotal = computed(() => Math.max(1, ...b.players.map((p) => p.total)))
 const last = b.roundIndex >= b.rounds - 1
 
-onMounted(() => sfx('win'))
+onMounted(() => {
+  sfx('win')
+  if (!tie.value) burst(innerWidth / 2, innerHeight * 0.18, [rows.value[0].player.color, '#facc15', '#ffffff'], 60)
+})
 </script>
 
 <template>
@@ -37,7 +41,7 @@ onMounted(() => sfx('win'))
       </div>
     </section>
 
-    <div class="go">
+    <div class="action-bar">
       <button class="btn big" @click="nextRound">{{ last ? '🏆 Final results' : `▶ Round ${r.number + 1}` }}</button>
     </div>
   </div>
@@ -59,7 +63,7 @@ onMounted(() => sfx('win'))
 }
 h2 {
   text-align: center;
-  font-size: 2rem;
+  font-size: clamp(1.4rem, 6vw, 2rem);
   margin: 0;
 }
 .muted {
@@ -71,7 +75,7 @@ h2 {
 }
 .bar-row {
   display: grid;
-  grid-template-columns: 110px 1fr 80px;
+  grid-template-columns: minmax(0, 90px) 1fr auto;
   gap: 10px;
   align-items: center;
   margin: 6px 0;
@@ -91,15 +95,17 @@ h2 {
 .bar div {
   height: 100%;
   border-radius: 999px;
-  transition: width 1s;
+  box-shadow: 0 0 12px currentColor;
+  animation: fill 1.1s cubic-bezier(0.2, 1, 0.3, 1) backwards 0.3s;
+}
+@keyframes fill {
+  from {
+    width: 0 !important;
+  }
 }
 .bt {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-.go {
-  display: flex;
-  justify-content: center;
-  padding: 10px 0 30px;
-}
+
 </style>

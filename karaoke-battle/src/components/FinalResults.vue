@@ -2,6 +2,8 @@
 import { computed, onMounted } from 'vue'
 import { store, standings, startBattle } from '../game/battle.js'
 import { sfx } from '../audio/engine.js'
+import { confetti } from '../fx/particles.js'
+import { vibrate } from '../fx/device.js'
 
 const b = store.battle
 const ranking = computed(() => standings(b))
@@ -10,13 +12,6 @@ const podium = computed(() => {
   const [a, bb, c] = ranking.value
   return [bb, a, c].filter(Boolean)
 })
-const confetti = Array.from({ length: 60 }, (_, i) => ({
-  left: Math.random() * 100,
-  delay: Math.random() * 3,
-  dur: 2.5 + Math.random() * 2.5,
-  color: ['#ff3d9a', '#22d3ee', '#facc15', '#a3e635', '#c084fc'][i % 5],
-  rot: Math.random() * 360,
-}))
 
 function rematch() {
   startBattle({
@@ -28,19 +23,17 @@ function rematch() {
   })
 }
 
-onMounted(() => sfx('win'))
+onMounted(() => {
+  sfx('win')
+  vibrate([30, 50, 30, 50, 120])
+  const colors = [...b.players.map((p) => p.color), '#facc15', '#ffffff']
+  confetti(colors)
+  setTimeout(() => confetti(colors, 90), 1400)
+})
 </script>
 
 <template>
   <div class="final">
-    <div class="confetti" aria-hidden="true">
-      <i
-        v-for="(c, i) in confetti"
-        :key="i"
-        :style="{ left: c.left + '%', background: c.color, animationDelay: c.delay + 's', animationDuration: c.dur + 's', transform: `rotate(${c.rot}deg)` }"
-      ></i>
-    </div>
-
     <div class="crown">👑</div>
     <h1>
       <template v-if="champs.length > 1">Shared crown!</template>
@@ -80,7 +73,7 @@ onMounted(() => sfx('win'))
       </div>
     </section>
 
-    <div class="actions">
+    <div class="action-bar">
       <button class="btn big" @click="rematch">🔁 Rematch</button>
       <button class="btn big ghost" @click="store.screen = 'setup'">⚙️ New setup</button>
       <button class="btn big ghost" @click="store.screen = 'leaderboard'">🏆 Hall of Fame</button>
@@ -108,8 +101,9 @@ onMounted(() => sfx('win'))
   }
 }
 h1 {
-  font-size: clamp(2.4rem, 8vw, 4.5rem);
+  font-size: clamp(2rem, 9vw, 4.5rem);
   margin: 0;
+  overflow-wrap: anywhere;
 }
 .podium {
   display: flex;
@@ -121,6 +115,7 @@ h1 {
 }
 .step {
   flex: 0 1 180px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -129,12 +124,19 @@ h1 {
 .pname {
   font-weight: 800;
   color: var(--c);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: clamp(0.8rem, 3vw, 1rem);
 }
 .ptotal {
   font-variant-numeric: tabular-nums;
 }
 .block {
   width: 100%;
+  font-family: var(--font-display);
+  box-shadow: 0 0 40px -10px var(--c);
   border-radius: 14px 14px 0 0;
   background: linear-gradient(180deg, var(--c), color-mix(in srgb, var(--c) 30%, #0b0618));
   font-size: 2.4rem;
@@ -145,15 +147,15 @@ h1 {
   animation: grow 0.8s cubic-bezier(0.3, 1.4, 0.5, 1) backwards;
 }
 .place1 .block {
-  height: 170px;
+  height: clamp(120px, 22vh, 170px);
   animation-delay: 0.6s;
 }
 .place2 .block {
-  height: 120px;
+  height: clamp(85px, 15vh, 120px);
   animation-delay: 0.3s;
 }
 .place3 .block {
-  height: 85px;
+  height: clamp(60px, 11vh, 85px);
 }
 @keyframes grow {
   from {
@@ -194,38 +196,5 @@ th {
 }
 .tot {
   font-weight: 900;
-}
-.actions {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  justify-content: center;
-  padding: 10px 0 30px;
-}
-.confetti {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  overflow: hidden;
-  z-index: 0;
-}
-.confetti i {
-  position: absolute;
-  top: -20px;
-  width: 9px;
-  height: 14px;
-  border-radius: 2px;
-  animation: fall linear infinite;
-  opacity: 0.85;
-}
-@keyframes fall {
-  to {
-    top: 105vh;
-    transform: rotate(720deg) translateX(40px);
-  }
-}
-.final > :not(.confetti) {
-  position: relative;
-  z-index: 1;
 }
 </style>

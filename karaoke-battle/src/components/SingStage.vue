@@ -1,9 +1,12 @@
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { parseSong, harmonize, lineSyllables, foldToOctave, pitchClassName } from '../game/music.js'
 import { createTracker, createCpuSinger, simulate, DIFFICULTIES } from '../game/scoring.js'
 import { playBacking, getAudioContext, sfx } from '../audio/engine.js'
 import { mic } from '../audio/mic.js'
+import { burst } from '../fx/particles.js'
+import { vibrate, keepAwake, toggleFullscreen, canFullscreen } from '../fx/device.js'
+import { setBackdropColors } from '../fx/background.js'
 
 const props = defineProps({
   song: { type: Object, required: true },
@@ -15,7 +18,8 @@ const emit = defineEmits(['done', 'quit'])
 
 // Mic + output latency: judge the singer slightly behind the band.
 const MIC_LATENCY = 0.12
-const SECONDS_AHEAD = 3.2
+const RATING_COLORS = { PERFECT: '#facc15', GREAT: '#22d3ee', GOOD: '#a3e635', MISS: '#f87171' }
+const RATING_BUZZ = { PERFECT: [15, 40, 15, 40, 30], GREAT: [25], GOOD: [], MISS: [80] }
 
 const transpose = props.challenge.transpose || 0
 const parsed = parseSong(props.song, transpose)
@@ -39,11 +43,17 @@ const tracker = createTracker(parsed, lineOwner, {
   strikes: props.challenge.strikes || 0,
   onEvent(e) {
     if (e.type === 'line') {
-      const color = { PERFECT: '#facc15', GREAT: '#22d3ee', GOOD: '#a3e635', MISS: '#f87171' }[e.rating]
+      const color = RATING_COLORS[e.rating]
       popup(e.rating, color, e.rating.toLowerCase())
+      if (RATING_BUZZ[e.rating].length && !byId[e.player].cpu) vibrate(RATING_BUZZ[e.rating])
+      if (e.rating === 'PERFECT' || e.rating === 'GREAT') {
+        const r = lyricsEl.value?.getBoundingClientRect()
+        if (r) burst(r.left + r.width / 2, r.top + r.height * 0.35, [color, byId[e.player].color, '#ffffff'], e.rating === 'PERFECT' ? 70 : 30)
+      }
     } else if (e.type === 'eliminated') {
       popup(`${byId[e.player].name} STRUCK OUT!`, '#f87171', 'big')
       sfx('strike')
+      vibrate([120, 60, 120])
     }
   },
 })
@@ -60,7 +70,12 @@ const micReady = ref(mic.ready)
 const micError = ref(mic.error)
 
 const canvas = ref(null)
+const stageEl = ref(null)
+const lyricsEl = ref(null)
+const fullscreenOk = canFullscreen()
 let backing = null
+let sparks = []
+let pendingSparks = []
 let raf = 0
 let trail = []
 let finishedAt = 0
@@ -89,6 +104,7 @@ const shownLines = computed(() => [lineView(currentLine.value), lineView(current
 const countdown = computed(() => (state.beat < 0 ? Math.ceil(-state.beat) : 0))
 const progress = computed(() => Math.max(0, Math.min(1, state.beat / parsed.totalBeats)))
 const activeOwner = computed(() => byId[lineOwner[currentLine.value]])
+watch(activeOwner, (o) => setBackdropColors(o.color), { immediate: true })
 
 function liveSnapshot() {
   const out = {}
@@ -107,6 +123,9 @@ function loop() {
   state.beat = (now - backing.startAt) / backing.spb
   const judgeBeat = (now - backing.startAt - MIC_LATENCY) / backing.spb
 
+  // Beat pulse drives the lane's glow (1 on the beat, fading to 0).
+  if (state.beat > -8) stageEl.value?.style.setProperty('--pulse', (1 - (((state.beat % 1) + 1) % 1)).toFixed(3))
+
   const reading = hasHuman ? mic.read() : { midi: null }
   state.micNote = reading.midi != null ? pitchClassName(reading.midi) : null
 
@@ -119,7 +138,9 @@ function loop() {
     const res = tracker.feed(judgeBeat, midi, 1 / 60 / backing.spb)
     if (midi != null) {
       const ref = note ? note.midi : (parsed.minMidi + parsed.maxMidi) / 2
-      trail.push({ beat: judgeBeat, midi: foldToOctave(midi, ref), hit: res && res.credit > 0, color: byId[owner].color })
+      const hit = res && res.credit > 0
+      trail.push({ beat: judgeBeat, midi: foldToOctave(midi, ref), hit, color: byId[owner].color })
+      if (hit && note && Math.random() < 0.5) pendingSparks.push({ midi: note.midi, color: byId[owner].color })
     }
     trail = trail.filter((p) => p.beat > judgeBeat - 2.5 / backing.spb)
     liveSnapshot()
@@ -151,8 +172,10 @@ function draw() {
   const dpr = window.devicePixelRatio || 1
   g.clearRect(0, 0, W, H)
   const spb = backing ? backing.spb : 60 / props.song.bpm
-  const playX = W * 0.2
-  const pxPerBeat = ((W - playX) / SECONDS_AHEAD) * spb
+  const playX = W * 0.18
+  // Narrow (phone) lanes show less of the future so notes stay readable.
+  const secondsAhead = Math.max(1.8, Math.min(3.2, c.clientWidth / 320))
+  const pxPerBeat = ((W - playX) / secondsAhead) * spb
   const beat = Math.max(state.beat - MIC_LATENCY / spb, -10)
   const lo = parsed.minMidi - 2
   const hi = parsed.maxMidi + 2
@@ -174,17 +197,22 @@ function draw() {
       if (x1 < -10 || x0 > W + 10) continue
       const st = tracker.noteState[n.index]
       const color = byId[lineOwner[n.line]].color
-      const h = Math.max(6 * dpr, rowH * 0.7)
+      const h = Math.max(8 * dpr, rowH * 0.72)
       const top = y(n.midi) - h / 2
-      g.globalAlpha = 0.28
-      g.fillStyle = color
+      const active = beat >= n.start && beat < n.start + n.dur
+      const body = g.createLinearGradient(0, top, 0, top + h)
+      body.addColorStop(0, color + '66')
+      body.addColorStop(1, color + '1a')
+      g.fillStyle = body
       roundRect(g, x0 + 1, top, x1 - x0 - 2, h, h / 2)
       g.fill()
-      g.globalAlpha = 1
       g.strokeStyle = color
-      g.lineWidth = 1.5 * dpr
+      g.lineWidth = (active ? 2.5 : 1.5) * dpr
+      g.shadowColor = color
+      g.shadowBlur = active ? 18 * dpr : 0
       roundRect(g, x0 + 1, top, x1 - x0 - 2, h, h / 2)
       g.stroke()
+      g.shadowBlur = 0
       // Filled-in where the singer was on pitch.
       g.save()
       roundRect(g, x0 + 1, top, x1 - x0 - 2, h, h / 2)
@@ -210,6 +238,29 @@ function draw() {
     g.fillStyle = p.hit ? '#fff' : 'rgba(255,255,255,0.35)'
     g.fill()
   }
+
+  // Sparks fly off the playhead while the singer is on pitch.
+  for (const s of pendingSparks) {
+    for (let k = 0; k < 2; k++) {
+      sparks.push({ x: playX, y: y(s.midi), vx: -(1 + Math.random() * 3) * dpr, vy: (Math.random() - 0.5) * 3 * dpr, life: 30, color: s.color })
+    }
+  }
+  pendingSparks = []
+  g.globalCompositeOperation = 'lighter'
+  sparks = sparks.filter((s) => s.life > 0)
+  for (const s of sparks) {
+    s.x += s.vx
+    s.y += s.vy
+    s.vy += 0.08 * dpr
+    s.life--
+    g.globalAlpha = s.life / 30
+    g.fillStyle = s.color
+    g.beginPath()
+    g.arc(s.x, s.y, 2.2 * dpr, 0, Math.PI * 2)
+    g.fill()
+  }
+  g.globalAlpha = 1
+  g.globalCompositeOperation = 'source-over'
 
   // Playhead.
   const grad = g.createLinearGradient(playX - 30 * dpr, 0, playX, 0)
@@ -288,6 +339,7 @@ function onKey(e) {
 }
 
 onMounted(async () => {
+  keepAwake(true)
   resizeObs = new ResizeObserver(resize)
   resizeObs.observe(canvas.value)
   resize()
@@ -302,54 +354,59 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   teardown()
+  keepAwake(false)
+  setBackdropColors('#ff3d9a')
   resizeObs?.disconnect()
   window.removeEventListener('keydown', onKey)
 })
 </script>
 
 <template>
-  <div class="stage" :style="{ '--owner': activeOwner.color }">
-    <header class="stage-top">
+  <div ref="stageEl" class="stage" :style="{ '--owner': activeOwner.color }">
+    <header class="topbar">
+      <button class="btn ghost icon" aria-label="Quit song" @click="quit">✕</button>
       <div class="song-meta">
         <div class="song-title">{{ song.title }}</div>
         <div class="song-sub">
           <span class="chip">{{ challenge.icon }} {{ challenge.name }}</span>
-          <span class="chip">{{ difficulty }}</span>
-          <span v-if="challenge.multiplier" class="chip gold">×{{ challenge.multiplier }} points</span>
+          <span class="chip hide-xs">{{ difficulty }}</span>
+          <span v-if="challenge.multiplier" class="chip gold">×{{ challenge.multiplier }}</span>
         </div>
       </div>
-      <div class="scores">
-        <div
-          v-for="s in singers"
-          :key="s.id"
-          class="score-card"
-          :class="{ active: activeOwner.id === s.id, out: state.live[s.id]?.eliminated }"
-          :style="{ '--c': s.color }"
-        >
-          <div class="sc-name">{{ s.cpu ? '🤖 ' : '' }}{{ s.name }}</div>
-          <div class="sc-score">{{ (state.live[s.id]?.score || 0).toLocaleString() }}</div>
-          <div class="sc-extra">
-            <span v-if="state.live[s.id]?.combo >= 3">🔥 {{ state.live[s.id].combo }} combo</span>
-            <span v-if="challenge.strikes" class="strikes">
-              <span v-for="k in challenge.strikes" :key="k" :class="{ hit: k <= (state.live[s.id]?.misses || 0) }">✖</span>
-            </span>
-          </div>
-        </div>
-      </div>
+      <button class="btn ghost icon" :aria-label="state.paused ? 'Resume' : 'Pause'" @click="togglePause">{{ state.paused ? '▶' : '❚❚' }}</button>
+      <button v-if="fullscreenOk" class="btn ghost icon hide-xs-land" aria-label="Toggle fullscreen" @click="toggleFullscreen">⛶</button>
     </header>
 
-    <div v-if="hasHuman && !micReady" class="mic-warn">
-      🎙️ No microphone — human singers can't score.
-      <button class="btn small" @click="enableMic">Enable mic</button>
-      <span v-if="micError" class="err">{{ micError }}</span>
+    <div class="scores">
+      <div
+        v-for="s in singers"
+        :key="s.id"
+        class="score-card"
+        :class="{ active: activeOwner.id === s.id, out: state.live[s.id]?.eliminated }"
+        :style="{ '--c': s.color }"
+      >
+        <div class="sc-name">{{ s.cpu ? '🤖 ' : '' }}{{ s.name }}</div>
+        <div class="sc-score">{{ (state.live[s.id]?.score || 0).toLocaleString() }}</div>
+        <div class="sc-extra">
+          <span v-if="state.live[s.id]?.combo >= 3" class="combo">🔥{{ state.live[s.id].combo }}</span>
+          <span v-if="challenge.strikes" class="strikes">
+            <span v-for="k in challenge.strikes" :key="k" :class="{ hit: k <= (state.live[s.id]?.misses || 0) }">✖</span>
+          </span>
+        </div>
+      </div>
     </div>
 
     <div class="lane-wrap">
       <canvas ref="canvas" class="lane"></canvas>
-      <div v-if="countdown" class="countdown" :key="countdown">{{ countdown }}</div>
+      <div v-if="hasHuman && !micReady" class="mic-warn">
+        <span>🎙️ No mic, humans can't score</span>
+        <button class="btn small" @click="enableMic">Enable mic</button>
+        <span v-if="micError" class="err">{{ micError }}</span>
+      </div>
+      <div v-if="countdown" :key="countdown" class="countdown">{{ countdown }}</div>
       <div v-if="state.phase === 'finished'" class="countdown finish">FINISH!</div>
       <div v-if="state.paused" class="paused">
-        <div>PAUSED</div>
+        <div class="paused-title">Paused</div>
         <div class="row">
           <button class="btn" @click="togglePause">▶ Resume</button>
           <button class="btn ghost" @click="quit">Quit song</button>
@@ -361,7 +418,7 @@ onBeforeUnmount(() => {
       <div v-if="hasHuman && micReady" class="mic-note">🎙️ {{ state.micNote || '—' }}</div>
     </div>
 
-    <div class="lyrics">
+    <div ref="lyricsEl" class="lyrics">
       <template v-for="(line, li) in shownLines" :key="li">
         <div v-if="line" class="lyric-line" :class="{ next: li === 1 }" :style="{ '--c': line.owner.color }">
           <span v-if="singers.length > 1" class="who">{{ line.owner.name }}</span>
@@ -373,7 +430,7 @@ onBeforeUnmount(() => {
               v-for="(s, si) in line.syllables"
               :key="si"
               class="syl"
-              :class="{ masked: challenge.memory && s.p === 0 && state.beat < s.start - 0.5 }"
+              :class="{ masked: challenge.memory && s.p === 0 && state.beat < s.start - 0.5, sung: s.p > 0 && s.p < 1 }"
               :style="{ '--p': s.p * 100 + '%' }"
               >{{ s.text }}{{ s.space ? ' ' : '' }}</span
             >
@@ -382,15 +439,13 @@ onBeforeUnmount(() => {
       </template>
     </div>
 
-    <footer class="stage-bottom">
+    <footer class="bottombar">
       <div class="progress"><div :style="{ width: progress * 100 + '%' }"></div></div>
-      <div class="controls">
-        <button class="btn small ghost" @click="togglePause">{{ state.paused ? '▶ Resume' : '⏸ Pause' }}</button>
+      <div v-if="challenge.guide === undefined || allCpu" class="controls">
         <button v-if="challenge.guide === undefined" class="btn small ghost" @click="toggleGuide">
           {{ state.guideOn ? '🔊 Guide on' : '🔇 Guide off' }}
         </button>
         <button v-if="allCpu" class="btn small ghost" @click="skipCpu">⏭ Skip CPU</button>
-        <button class="btn small ghost" @click="quit">✕ Quit</button>
       </div>
     </footer>
   </div>
@@ -398,45 +453,73 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .stage {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  height: 100%;
-  min-height: calc(100vh - 40px);
+  --pulse: 0;
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  /* minmax(0, …) stops the sideways-scrolling score row from widening the stage. */
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(150px, 1fr) auto auto;
+  gap: 10px;
+  padding-block: calc(10px + var(--safe-t)) calc(10px + var(--safe-b));
+  padding-left: var(--gutter-l);
+  padding-right: var(--gutter-r);
+  max-width: 1400px;
+  margin: 0 auto;
 }
-.stage-top {
+.topbar {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.song-meta {
+  flex: 1;
+  min-width: 0;
 }
 .song-title {
-  font-size: 1.4rem;
-  font-weight: 800;
+  font-family: var(--font-display);
+  font-size: clamp(0.95rem, 2.6vw, 1.3rem);
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .song-sub {
   display: flex;
   gap: 6px;
-  margin-top: 6px;
-  flex-wrap: wrap;
+  margin-top: 4px;
+  overflow: hidden;
 }
+
+/* Scores scroll sideways on phones when there are many singers. */
 .scores {
   display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
+  gap: 8px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  padding: 4px 2px;
+}
+.scores::-webkit-scrollbar {
+  display: none;
 }
 .score-card {
-  min-width: 130px;
+  flex: 1 0 120px;
+  max-width: 240px;
+  scroll-snap-align: start;
   padding: 8px 14px;
-  border-radius: 14px;
-  background: var(--panel);
-  border: 2px solid transparent;
-  transition: all 0.2s;
+  border-radius: 16px;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  border: 1.5px solid var(--line);
+  transition: border-color 0.25s, box-shadow 0.25s, transform 0.25s;
 }
 .score-card.active {
   border-color: var(--c);
-  box-shadow: 0 0 22px color-mix(in srgb, var(--c) 45%, transparent);
+  box-shadow: 0 0 calc(14px + var(--pulse) * 18px) color-mix(in srgb, var(--c) 55%, transparent);
+  transform: translateY(-1px);
 }
 .score-card.out {
   opacity: 0.4;
@@ -444,20 +527,28 @@ onBeforeUnmount(() => {
 }
 .sc-name {
   color: var(--c);
-  font-weight: 700;
-  font-size: 0.85rem;
+  font-weight: 800;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .sc-score {
-  font-size: 1.6rem;
+  font-family: var(--font-display);
+  font-size: clamp(1.15rem, 3.4vw, 1.6rem);
   font-weight: 900;
   font-variant-numeric: tabular-nums;
 }
 .sc-extra {
   font-size: 0.75rem;
-  min-height: 1em;
+  min-height: 1.1em;
   display: flex;
   gap: 8px;
   color: var(--muted);
+}
+.combo {
+  color: #fb923c;
+  font-weight: 800;
 }
 .strikes span {
   opacity: 0.3;
@@ -466,28 +557,17 @@ onBeforeUnmount(() => {
   opacity: 1;
   color: #f87171;
 }
-.mic-warn {
-  background: #3b1d2a;
-  border: 1px solid #f43f5e55;
-  padding: 10px 14px;
-  border-radius: 12px;
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.err {
-  color: #fda4af;
-  font-size: 0.85rem;
-}
+
 .lane-wrap {
   position: relative;
-  flex: 1;
-  min-height: 240px;
-  border-radius: 18px;
+  min-height: 0;
+  border-radius: 22px;
   overflow: hidden;
-  background: linear-gradient(180deg, #120a2a, #0b0618);
-  border: 1px solid #ffffff14;
+  background: linear-gradient(180deg, rgb(18 10 42 / 0.82), rgb(7 3 15 / 0.9));
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  border: 1px solid color-mix(in srgb, var(--owner) calc(20% + var(--pulse) * 40%), transparent);
+  box-shadow: 0 0 calc(var(--pulse) * 40px) -10px var(--owner), inset 0 0 60px -30px var(--owner);
 }
 .lane {
   width: 100%;
@@ -496,49 +576,87 @@ onBeforeUnmount(() => {
   position: absolute;
   inset: 0;
 }
+.mic-warn {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  max-width: calc(100% - 16px);
+  z-index: 2;
+  background: rgb(59 29 42 / 0.88);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border: 1px solid #f43f5e55;
+  padding: 4px 4px 4px 12px;
+  border-radius: 999px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 0.78rem;
+}
+.mic-warn .btn {
+  min-height: 32px;
+  padding: 4px 12px;
+  font-size: 0.75rem;
+  flex: none;
+}
+.mic-warn .err {
+  display: none;
+}
+.err {
+  color: #fda4af;
+  font-size: 0.8rem;
+}
 .countdown {
   position: absolute;
   inset: 0;
   display: grid;
   place-items: center;
-  font-size: 7rem;
+  font-family: var(--font-display);
+  font-size: clamp(4rem, 18vw, 8rem);
   font-weight: 900;
   color: var(--owner);
-  text-shadow: 0 0 40px var(--owner);
-  animation: pop 0.5s ease-out;
+  text-shadow: 0 0 40px var(--owner), 0 0 90px var(--owner);
+  animation: pop 0.5s cubic-bezier(0.2, 1.6, 0.4, 1);
   pointer-events: none;
 }
 .countdown.finish {
-  font-size: 4.5rem;
-  color: #facc15;
-  text-shadow: 0 0 40px #facc15;
+  font-size: clamp(2.4rem, 10vw, 4.5rem);
+  color: var(--gold);
+  text-shadow: 0 0 40px var(--gold);
 }
 @keyframes pop {
   from {
-    transform: scale(1.6);
+    transform: scale(2.2);
     opacity: 0;
+    filter: blur(10px);
   }
 }
 .paused {
   position: absolute;
   inset: 0;
-  background: #0009;
-  backdrop-filter: blur(4px);
+  background: rgb(7 3 15 / 0.6);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
   display: grid;
   place-content: center;
   gap: 16px;
-  font-size: 2.4rem;
-  font-weight: 900;
   text-align: center;
+  z-index: 3;
+}
+.paused-title {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 900;
 }
 .row {
   display: flex;
   gap: 10px;
   justify-content: center;
+  flex-wrap: wrap;
 }
 .popups {
   position: absolute;
-  top: 16px;
+  top: 12px;
   left: 0;
   right: 0;
   display: flex;
@@ -547,72 +665,82 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 .popup {
-  font-size: 2rem;
+  font-family: var(--font-display);
+  font-size: clamp(1.3rem, 5vw, 2rem);
   font-weight: 900;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-shadow: 0 0 20px currentColor;
-  animation: rise 1.3s ease-out forwards;
+  animation: rise 1.3s cubic-bezier(0.2, 1.4, 0.4, 1) forwards;
 }
 .popup.big {
-  font-size: 2.4rem;
+  font-size: clamp(1.1rem, 4.5vw, 2rem);
+  text-align: center;
 }
 .popup.perfect {
-  font-size: 2.6rem;
+  font-size: clamp(1.6rem, 6.5vw, 2.6rem);
+  background: linear-gradient(90deg, #facc15, #fff, #facc15);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 14px #facc15);
 }
 @keyframes rise {
   0% {
-    transform: translateY(20px) scale(0.6);
+    transform: translateY(24px) scale(0.5);
     opacity: 0;
   }
   15% {
-    transform: translateY(0) scale(1.1);
+    transform: translateY(0) scale(1.15);
     opacity: 1;
   }
   80% {
     opacity: 1;
   }
   100% {
-    transform: translateY(-30px);
+    transform: translateY(-30px) scale(1);
     opacity: 0;
   }
 }
 .mic-note {
   position: absolute;
-  right: 12px;
-  bottom: 10px;
-  font-size: 0.85rem;
+  right: 10px;
+  top: 10px;
+  font-size: 0.8rem;
   color: var(--muted);
-  background: #0008;
+  background: rgb(0 0 0 / 0.5);
   padding: 4px 10px;
   border-radius: 999px;
 }
+
 .lyrics {
-  min-height: 130px;
+  min-height: 96px;
   text-align: center;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
 }
 .lyric-line {
-  font-size: clamp(1.4rem, 4vw, 2.5rem);
-  font-weight: 800;
-  line-height: 1.25;
+  font-family: var(--font-display);
+  font-size: clamp(1.15rem, 4.6vw, 2.4rem);
+  font-weight: 700;
+  line-height: 1.3;
 }
 .lyric-line.next {
-  font-size: clamp(1rem, 2.6vw, 1.5rem);
-  opacity: 0.45;
+  font-size: clamp(0.85rem, 2.8vw, 1.35rem);
+  opacity: 0.4;
 }
 .who {
   display: inline-block;
-  font-size: 0.45em;
+  font-family: var(--font-body);
+  font-size: max(0.7rem, 0.4em);
   vertical-align: middle;
   padding: 3px 10px;
   border-radius: 999px;
   background: var(--c);
-  color: #0b0618;
-  margin-right: 10px;
-  font-weight: 800;
+  color: #07030f;
+  margin-right: 8px;
+  font-weight: 900;
 }
 .syl {
   white-space: pre;
@@ -621,33 +749,38 @@ onBeforeUnmount(() => {
   background-clip: text;
   color: transparent;
 }
+.syl.sung {
+  filter: drop-shadow(0 0 10px var(--c));
+}
 .lyric-line.next .syl {
   background: none;
   color: #fff;
 }
 .masked {
   color: transparent !important;
-  background: #ffffff1c !important;
+  background: rgb(255 255 255 / 0.12) !important;
   border-radius: 6px;
 }
 .lyric-line > .masked {
-  color: #ffffff66 !important;
+  color: rgb(255 255 255 / 0.4) !important;
   background: none !important;
 }
-.stage-bottom {
+
+.bottombar {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 .progress {
   height: 6px;
-  background: #ffffff14;
+  background: rgb(255 255 255 / 0.08);
   border-radius: 999px;
   overflow: hidden;
 }
 .progress div {
   height: 100%;
-  background: var(--owner);
+  background: linear-gradient(90deg, var(--accent), var(--owner));
+  box-shadow: 0 0 12px var(--owner);
   transition: width 0.1s linear;
 }
 .controls {
@@ -656,13 +789,36 @@ onBeforeUnmount(() => {
   justify-content: center;
   flex-wrap: wrap;
 }
-@media (max-width: 640px) {
-  .countdown {
-    font-size: 5rem;
+
+@media (max-width: 480px) {
+  .hide-xs {
+    display: none;
   }
   .score-card {
-    min-width: 0;
-    flex: 1;
+    padding: 6px 10px;
+    flex-basis: 104px;
+  }
+}
+/* Phone held sideways: squeeze everything around the lane. */
+@media (max-height: 500px) and (orientation: landscape) {
+  .stage {
+    gap: 6px;
+    grid-template-rows: auto auto minmax(100px, 1fr) auto auto;
+  }
+  .song-sub,
+  .sc-extra,
+  .lyric-line.next,
+  .hide-xs-land {
+    display: none;
+  }
+  .score-card {
+    padding: 4px 10px;
+  }
+  .lyrics {
+    min-height: 0;
+  }
+  .lyric-line {
+    font-size: clamp(1rem, 4vh, 1.5rem);
   }
 }
 </style>
