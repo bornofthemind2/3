@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EdgeFinder</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%2310b981'/><path d='M8 21l6-6 4 4 7-8' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo">◢</span> EdgeFinder</div>
+    <nav id="tabs">
+      <button data-tab="arbs" class="active">Arbitrage <span class="pill" id="c-arbs">0</span></button>
+      <button data-tab="ev">+EV <span class="pill" id="c-ev">0</span></button>
+      <button data-tab="middles">Middles <span class="pill" id="c-middles">0</span></button>
+      <button data-tab="lowholds">Low Holds <span class="pill" id="c-lowHolds">0</span></button>
+      <button data-tab="odds">Odds Screen</button>
+      <button data-tab="wallet">Wallet</button>
+      <button data-tab="calc">Calculators</button>
+      <button data-tab="settings">Settings</button>
+    </nav>
+    <div class="status" id="status">connecting…</div>
+  </header>
+
+  <div class="toolbar" id="toolbar">
+    <select id="f-sport">
+      <option value="">All sports</option>
+      <option value="americanfootball">Football</option>
+      <option value="basketball">Basketball</option>
+      <option value="icehockey">Hockey</option>
+      <option value="baseball">Baseball</option>
+      <option value="soccer">Soccer</option>
+    </select>
+    <select id="f-book"><option value="">All books</option></select>
+    <input id="f-q" type="search" placeholder="Search team / league">
+    <select id="f-format" title="Odds format">
+      <option value="american">American</option>
+      <option value="decimal">Decimal</option>
+      <option value="implied">Implied %</option>
+    </select>
+    <label class="chk"><input type="checkbox" id="f-pause"> Pause updates</label>
+    <button id="btn-scan" class="ghost">↻ Scan now</button>
+  </div>
+
+  <main id="view"></main>
+
+  <div id="toasts"></div>
+  <dialog id="dlg"></dialog>
+
+  <footer>
+    Analytics tool only — EdgeFinder does not take bets. Lines move fast and books may limit or void “arb” bets; verify every price before staking.
+    Gamble responsibly. If gambling stops being fun, call 1‑800‑GAMBLER.
+  </footer>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

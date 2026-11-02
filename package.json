@@ -1,0 +1,14 @@
+{
+  "name": "edgefinder",
+  "version": "1.0.0",
+  "description": "Sports betting analytics: arbitrage finder, +EV scanner, live odds screen, bankroll tracking and calculators across many sportsbooks.",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": { "node": ">=20" },
+  "license": "MIT"
+}
