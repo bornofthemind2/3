@@ -1,6 +1,7 @@
 // Zero-dependency HTTP server: REST API + Server-Sent Events + static UI.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store, HttpError } from './store.js';
@@ -11,6 +12,18 @@ import { BOOKS } from './providers/books.js';
 import * as calc from './lib/calculators.js';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
+
+/** Load KEY=value lines from .env (git-ignored) without overriding real environment variables. */
+export function loadDotEnv(file = join(ROOT, '.env')) {
+  let text;
+  try { text = readFileSync(file, 'utf8'); } catch { return; }
+  for (const line of text.split(/\r?\n/)) {
+    const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+    if (!m || line.trimStart().startsWith('#')) continue;
+    const v = m[2].replace(/^(['"])(.*)\1$/, '$2');
+    if (process.env[m[1]] === undefined) process.env[m[1]] = v;
+  }
+}
 const STATIC = { '/': join(ROOT, 'public'), '/lib/': join(ROOT, 'src/lib') };
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json' };
 
@@ -19,7 +32,8 @@ export function createApp({ provider, store, scanner } = {}) {
   provider ??= process.env.ODDS_API_KEY
     ? new TheOddsApiProvider({
       apiKey: process.env.ODDS_API_KEY,
-      sports: process.env.ODDS_SPORTS?.split(','),
+      sports: process.env.ODDS_SPORTS?.split(',').map((x) => x.trim()).filter(Boolean),
+      markets: process.env.ODDS_MARKETS || undefined,
       books: () => [...store.settings.myBooks, ...store.settings.sharpBooks],
     })
     : new SimulatedProvider();
@@ -39,8 +53,7 @@ export function createApp({ provider, store, scanner } = {}) {
       // catalogue + any extra books the live provider returned (The Odds API has 70+)
       const seen = new Set(scanner.events.flatMap((e) => e.offers.map((o) => o.book)));
       const known = new Set(BOOKS.map((b) => b.id));
-      const live = provider.name !== 'simulated';
-      const list = BOOKS.filter((b) => !live || seen.has(b.id) || store.settings.sharpBooks.includes(b.id));
+      const list = [...BOOKS];
       for (const id of seen) if (!known.has(id)) list.push({ id, name: id.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()), sharp: false });
       return list;
     }],
@@ -158,6 +171,7 @@ async function serveStatic(pathname, res) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  loadDotEnv();
   const port = Number(process.env.PORT ?? 3000);
   const { server, scanner, provider } = createApp();
   scanner.start();

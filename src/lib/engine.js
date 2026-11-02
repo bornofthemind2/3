@@ -78,7 +78,7 @@ function bestAllowed(group, allowed) {
     let best = null;
     for (const [book, p] of Object.entries(group.books)) {
       if (!allowed(book) || !p[o]) continue;
-      if (!best || p[o].price > best.price) best = { book, price: p[o].price };
+      if (!best || p[o].price > best.price) best = { book, price: p[o].price, updated: p[o].updated };
     }
     return [o, best];
   }));
@@ -170,7 +170,7 @@ export function findPositiveEV(events, {
             id: `ev:${ev.id}:${g.key}:${o}:${book}`,
             ...baseInfo(ev, g),
             outcome: o, label: outcomeLabel(ev, g.market, g.line, o),
-            book, price: p.price, fairProb: round(prob, 4), fairPrice: round(1 / prob, 3),
+            book, price: p.price, updated: p.updated, fairProb: round(prob, 4), fairPrice: round(1 / prob, 3),
             evPct: round(evPct, 2), fairSource: fair.source, sharpCount: fair.books,
             kellyPct: k.stakePct, kellyStake: k.stake,
           });

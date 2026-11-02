@@ -26,6 +26,7 @@ async function api(path, opts = {}) {
 const fmt = () => $('#f-format').value;
 const odds = (d) => formatOdds(d, fmt());
 const bookName = (id) => state.books[id]?.name ?? id;
+const since = (iso) => ago(Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000)));
 const ago = (sec) => (sec < 60 ? `${sec}s` : sec < 3600 ? `${Math.floor(sec / 60)}m` : `${Math.floor(sec / 3600)}h`);
 const when = (iso, status) => status === 'live' ? '<span class="tag live">LIVE</span>'
   : `<span class="tag">${new Date(iso).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}</span>`;
@@ -56,7 +57,7 @@ const views = {
           <div class="big">${pct(a.profitPct)}</div>
         </div>
         <table class="legs">${a.legs.map((l) => `
-          <tr><td>${esc(l.label)}</td><td class="book">${esc(bookName(l.book))}</td><td class="num">${odds(l.price)}</td><td class="num">${money(l.stake)}</td></tr>`).join('')}
+          <tr><td>${esc(l.label)}</td><td class="book">${esc(bookName(l.book))}${l.updated ? ` <span class="sub" title="price last updated">${since(l.updated)}</span>` : ''}</td><td class="num">${odds(l.price)}</td><td class="num">${money(l.stake)}</td></tr>`).join('')}
         </table>
         <div class="card-foot">
           <span>Profit <b class="pos">${money(a.guaranteedProfit)}</b> on ${money(a.totalStake)} · seen ${ago(a.ageSec)}</span>
@@ -230,8 +231,14 @@ const views = {
     return `<form id="settings-form" class="two">
       <section class="card"><h2>Scanner</h2>
         <div class="row">
-          <label class="field">Scan interval (s)<input name="scanIntervalSec" type="number" min="1" value="${s.scanIntervalSec}"></label>
+          <label class="field">Demo feed scan (s)<input name="scanIntervalSec" type="number" min="1" value="${s.scanIntervalSec}"></label>
+          <label class="field">Live odds scan (s, 0 = manual)<input name="liveIntervalSec" type="number" min="0" step="30" value="${s.liveIntervalSec}"></label>
           <label class="field">Default total stake ($)<input name="totalStake" type="number" min="1" value="${s.totalStake}"></label>
+        </div>
+        ${state.status?.live ? `<p class="sub">Each live scan costs ~${state.status.live.costPerScan} credits (${state.status.live.sports.length} in-season sports × markets × ⌈bookmakers ÷ 10⌉). At this interval that’s ~${s.liveIntervalSec ? Math.round((86400 / s.liveIntervalSec) * state.status.live.costPerScan).toLocaleString() : 0} credits/day. ${state.status.live.credits.remaining ?? '?'} left.</p>` : ''}
+        <div class="row">
+          <label class="field">Ignore pre-game prices older than (min, 0 = off)<input name="staleAfterMin" type="number" min="0" value="${s.staleAfterMin}"></label>
+          <label class="field">Ignore live prices older than (s, 0 = off)<input name="staleLiveSec" type="number" min="0" value="${s.staleLiveSec}"></label>
         </div>
         <div class="row">
           <label class="field">Min arb %<input name="minArbPct" type="number" step="0.05" value="${s.minArbPct}"></label>
@@ -426,7 +433,11 @@ async function render(force = false) {
 function setStatus(s) {
   state.status = s;
   const ok = !s.lastError;
-  $('#status').innerHTML = `<span class="dot ${ok ? '' : 'off'}"></span>${s.provider === 'simulated' ? 'Demo feed' : 'Live: The Odds API'} · ${s.counts.books} books · ${s.counts.events} games (${s.counts.live} live) · ${s.lastScan ? new Date(s.lastScan).toLocaleTimeString() : '—'}${s.remainingCredits ? ` · ${s.remainingCredits} credits` : ''}${ok ? '' : ` · ⚠ ${esc(s.lastError)}`}`;
+  const L = s.live;
+  const liveBits = L ? ` · ${L.credits.remaining ?? '?'} credits left (~${L.costPerScan}/scan) · ${s.intervalSec ? `next ${s.nextScan ? new Date(s.nextScan).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '—'}` : 'manual scans'}` : '';
+  const warn = [s.lastError, ...(L?.warnings ?? []), L?.missingBooks?.length && s.scanCount ? `no odds from ${L.missingBooks.map(bookName).join(', ')}` : ''].filter(Boolean);
+  $('#status').innerHTML = `<span class="dot ${ok ? '' : 'off'}"></span>${s.provider === 'simulated' ? '<b>Demo feed</b> (simulated — don’t bet off it)' : 'Live: The Odds API'} · ${s.counts.books} books · ${s.counts.events} games (${s.counts.live} live) · ${s.lastScan ? new Date(s.lastScan).toLocaleTimeString() : '—'}${liveBits}${warn.length ? ` · <span title="${esc(warn.join(' | '))}" style="color:var(--warn)">⚠ ${esc(warn[0])}${warn.length > 1 ? ` (+${warn.length - 1})` : ''}</span>` : ''}`;
+  $('#btn-scan').title = L ? `Costs ~${L.costPerScan} API credits` : 'Rescan now';
   for (const k of ['arbs', 'ev', 'middles', 'lowHolds']) {
     const el = $(`#c-${k}`); el.textContent = s.counts[k]; el.classList.toggle('hot', k !== 'lowHolds' && s.counts[k] > 0);
   }
@@ -506,7 +517,7 @@ document.addEventListener('submit', async (e) => {
     const fd = new FormData(f);
     const n = (k) => Number(fd.get(k));
     const patch = {
-      scanIntervalSec: n('scanIntervalSec'), totalStake: n('totalStake'), minArbPct: n('minArbPct'), minEvPct: n('minEvPct'),
+      scanIntervalSec: n('scanIntervalSec'), liveIntervalSec: n('liveIntervalSec'), staleAfterMin: n('staleAfterMin'), staleLiveSec: n('staleLiveSec'), totalStake: n('totalStake'), minArbPct: n('minArbPct'), minEvPct: n('minEvPct'),
       minMiddleEvPct: n('minMiddleEvPct'), maxHoldPct: n('maxHoldPct'), devigMethod: fd.get('devigMethod'), kellyFraction: n('kellyFraction'),
       sharpBooks: fd.getAll('sharp'), myBooks: fd.getAll('mybook'),
       alerts: { enabled: fd.get('alertsEnabled') === 'on', minArbPct: n('alertArb'), minEvPct: n('alertEv'), webhookUrl: fd.get('webhookUrl') },

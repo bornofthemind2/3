@@ -16,26 +16,31 @@ the exact stakes. Then **you place the bets yourself** in each book's app.
 ```bash
 node --version          # 20 or newer; there are no npm dependencies
 npm start               # http://localhost:3000, using the built-in demo odds feed
-npm test                # 23 tests
+npm test                # 29 tests
 ```
 
-To use **live odds**, get a key from [The Odds API](https://the-odds-api.com) and run:
+### Live odds (The Odds API)
 
-```bash
-ODDS_API_KEY=your_key npm start
-# optional: choose sports (default: NFL, NCAAF, NBA, NCAAB, NHL, MLB)
-ODDS_SPORTS=americanfootball_nfl,basketball_nba ODDS_API_KEY=your_key npm start
-```
+1. Get a key at [the-odds-api.com](https://the-odds-api.com).
+2. Provide it as `ODDS_API_KEY`. Either set an environment variable, or `cp .env.example .env` and fill it in
+   (`.env` is git-ignored; a real environment variable wins over the file).
+3. `npm start`. The status bar switches to **Live: The Odds API**, with credits left and cost per scan.
 
-The status bar says **Demo feed** or **Live: The Odds API** so you always know which you're looking at.
-The demo feed is simulated: never bet off it.
+If you're behind an HTTP proxy (corporate network, or a cloud sandbox), Node's `fetch` ignores
+`HTTPS_PROXY` by default. Start with `NODE_USE_ENV_PROXY=1 npm start` (Node 22.21+ / 24+).
 
-| Env var | Default | |
-|---|---|---|
-| `PORT` | `3000` | |
-| `ODDS_API_KEY` | none (demo feed) | turns on live odds |
-| `ODDS_SPORTS` | 6 major US sports | comma-separated Odds API sport keys |
-| `DATA_FILE` | `data/state.json` | settings, balances and bet log (git-ignored) |
+**Credits.** Each scan costs `in-season sports × markets × ⌈bookmakers ÷ 10⌉` credits. Only your books plus
+the sharp reference books are requested. The defaults (9 Virginia books + Pinnacle = 10 bookmakers, 3 markets) cost
+**3 credits per in-season sport per scan**, so about 21 for 7 sports. The live feed rescans every **300 s** by default
+(Settings → *Live odds scan*; `0` = only when you press *Scan now*). At 300 s that's about 6,000 credits/day,
+so pick the interval to fit your plan. Settings shows the projected credits per day. To cut cost, limit sports
+(`ODDS_SPORTS=…`), drop markets (`ODDS_MARKETS=h2h,spreads`), or tick fewer books. The scanner stops
+before a scan would overrun your remaining credits.
+
+**Stale prices.** Prices a book hasn't refreshed recently are the usual source of fake arbs. On the live feed,
+pre-game prices older than 30 min and in-play prices older than 120 s are ignored (both adjustable in
+Settings), and each arb leg shows how old its price is. The status bar also lists any of your books the feed
+returned no odds for.
 
 ## Features
 
@@ -61,9 +66,8 @@ With $1,000 total: stake **$481.79** on A and **$518.21** on B. Either way pays 
 
 ### Automation and alerts
 
-The scanner re-polls every few seconds on the demo feed. On the live feed it polls at most once a
-minute, to save API credits; only your books plus the sharp books are requested. New opportunities above
-your alert thresholds:
+The scanner re-polls every few seconds on the demo feed and on your chosen interval on the live feed
+(see Credits above). New opportunities above your alert thresholds:
 
 - appear as in-app toasts and browser notifications (Settings → *Enable browser notifications*);
 - are POSTed to a **webhook**, if you set one: Discord and Slack incoming-webhook URLs work as-is.

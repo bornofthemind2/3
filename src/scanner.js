@@ -22,11 +22,19 @@ export class Scanner extends EventEmitter {
     this.timer = null;
   }
 
+  get isLive() { return this.provider.name !== 'simulated'; }
+
+  /** Seconds until the next automatic scan; 0 = manual only (live feed). */
+  intervalSec() {
+    const s = this.store.settings;
+    return this.isLive ? s.liveIntervalSec : s.scanIntervalSec;
+  }
+
   start() {
     const loop = async () => {
-      await this.scan();
-      const sec = this.provider.name === 'simulated' ? this.store.settings.scanIntervalSec : Math.max(60, this.store.settings.scanIntervalSec);
-      this.timer = setTimeout(loop, sec * 1000);
+      if (!this.isLive || this.scanCount === 0 || this.intervalSec() > 0) await this.scan();
+      // re-check every 5s while in manual mode so a settings change takes effect
+      this.timer = setTimeout(loop, (this.intervalSec() || 5) * 1000);
     };
     loop();
   }
@@ -37,6 +45,7 @@ export class Scanner extends EventEmitter {
     const t0 = Date.now();
     try {
       this.events = await this.provider.fetch();
+      this.nextScan = this.intervalSec() ? new Date(Date.now() + this.intervalSec() * 1000).toISOString() : null;
       this.compute();
       this.lastError = null;
     } catch (e) {
@@ -50,18 +59,31 @@ export class Scanner extends EventEmitter {
     return this.results;
   }
 
+  /** Drop prices a book hasn't refreshed recently — stale lines are the classic false arb. */
+  freshEvents() {
+    const s = this.store.settings;
+    if (!this.isLive) return this.events;
+    const now = Date.now();
+    return this.events.map((e) => {
+      const maxAge = e.status === 'live' ? s.staleLiveSec * 1000 : s.staleAfterMin * 60000;
+      if (!maxAge) return e;
+      return { ...e, offers: e.offers.filter((o) => !o.updated || now - Date.parse(o.updated) <= maxAge) };
+    });
+  }
+
   compute() {
     const s = this.store.settings;
+    const events = this.freshEvents();
     const bankroll = this.store.walletSummary().totals.bankroll || 1000;
     const common = { books: s.myBooks, totalStake: s.totalStake };
     const results = {
-      arbs: findArbitrage(this.events, { ...common, minProfitPct: s.minArbPct }),
-      ev: findPositiveEV(this.events, {
+      arbs: findArbitrage(events, { ...common, minProfitPct: s.minArbPct }),
+      ev: findPositiveEV(events, {
         ...common, sharpBooks: s.sharpBooks, minEvPct: s.minEvPct, method: s.devigMethod,
         bankroll, kellyFraction: s.kellyFraction,
       }),
-      middles: findMiddles(this.events, { ...common, minEvPct: s.minMiddleEvPct, sharpBooks: s.sharpBooks, method: s.devigMethod }),
-      lowHolds: findLowHolds(this.events, { maxHoldPct: s.maxHoldPct, books: s.myBooks }),
+      middles: findMiddles(events, { ...common, minEvPct: s.minMiddleEvPct, sharpBooks: s.sharpBooks, method: s.devigMethod }),
+      lowHolds: findLowHolds(events, { maxHoldPct: s.maxHoldPct, books: s.myBooks }),
     };
     // track how long each opportunity has been alive
     const now = Date.now();
@@ -104,6 +126,8 @@ export class Scanner extends EventEmitter {
       provider: this.provider.name,
       lastScan: this.lastScan, lastError: this.lastError, scanCount: this.scanCount, scanMs: this.scanMs,
       remainingCredits: this.provider.remainingCredits ?? null,
+      intervalSec: this.intervalSec(), nextScan: this.nextScan ?? null,
+      live: this.provider.info?.() ?? null,
       counts: {
         events: this.events.length,
         live: this.events.filter((e) => e.status === 'live').length,

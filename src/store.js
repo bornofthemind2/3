@@ -5,13 +5,17 @@ import { randomUUID } from 'node:crypto';
 import { SHARP_BOOKS, DEFAULT_MY_BOOKS, BOOKS } from './providers/books.js';
 
 export const DEFAULT_SETTINGS = {
-  scanIntervalSec: 5,
+  scanIntervalSec: 5, // demo feed
+  liveIntervalSec: 300, // live odds API: every scan costs credits (0 = only when you press "Scan now")
+  staleAfterMin: 30, // ignore pre-game prices not updated for this long (0 = off)
+  staleLiveSec: 120, // ignore in-play prices older than this (0 = off)
   totalStake: 100,
   minArbPct: 0.25,
   minEvPct: 1.5,
   minMiddleEvPct: 0.5,
   maxHoldPct: 2,
-  sharpBooks: SHARP_BOOKS,
+  // Pinnacle alone keeps your 9 books + 1 sharp at 10 bookmakers = 1 credit "region" per market.
+  sharpBooks: SHARP_BOOKS.includes('pinnacle') ? ['pinnacle'] : SHARP_BOOKS,
   devigMethod: 'multiplicative',
   kellyFraction: 0.25,
   myBooks: DEFAULT_MY_BOOKS, // books you have accounts at — the only books you'll be told to bet
@@ -55,6 +59,8 @@ export class Store {
       this.state.settings[k] = k === 'alerts' ? { ...this.state.settings.alerts, ...v } : v;
     }
     this.state.settings.scanIntervalSec = Math.max(1, Number(this.state.settings.scanIntervalSec) || 5);
+    const live = Number(this.state.settings.liveIntervalSec);
+    this.state.settings.liveIntervalSec = live > 0 ? Math.max(30, live) : 0;
     this.save();
     return this.settings;
   }
