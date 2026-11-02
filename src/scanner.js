@@ -53,15 +53,15 @@ export class Scanner extends EventEmitter {
   compute() {
     const s = this.store.settings;
     const bankroll = this.store.walletSummary().totals.bankroll || 1000;
-    const common = { excludeBooks: s.excludeBooks, totalStake: s.totalStake };
+    const common = { books: s.myBooks, totalStake: s.totalStake };
     const results = {
       arbs: findArbitrage(this.events, { ...common, minProfitPct: s.minArbPct }),
       ev: findPositiveEV(this.events, {
         ...common, sharpBooks: s.sharpBooks, minEvPct: s.minEvPct, method: s.devigMethod,
         bankroll, kellyFraction: s.kellyFraction,
       }),
-      middles: findMiddles(this.events, { ...common, minEvPct: s.minMiddleEvPct }),
-      lowHolds: findLowHolds(this.events, { maxHoldPct: s.maxHoldPct }),
+      middles: findMiddles(this.events, { ...common, minEvPct: s.minMiddleEvPct, sharpBooks: s.sharpBooks, method: s.devigMethod }),
+      lowHolds: findLowHolds(this.events, { maxHoldPct: s.maxHoldPct, books: s.myBooks }),
     };
     // track how long each opportunity has been alive
     const now = Date.now();

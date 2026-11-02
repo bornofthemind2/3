@@ -9,7 +9,7 @@
 // outcome ∈ home|away|draw for h2h/spreads, over|under for totals.
 // For spreads `line` is the HOME handicap (away handicap is −line).
 import { devig, hold, round } from './odds.js';
-import { arbStakes, expectedValue, kelly, middle } from './calculators.js';
+import { arbStakes, expectedValue, kelly } from './calculators.js';
 
 export const MARKET_OUTCOMES = {
   h2h2: ['home', 'away'],
@@ -66,6 +66,24 @@ export function groupMarkets(event) {
   return [...groups.values()];
 }
 
+/** Allowlist test for bettable books. `books` null/empty = every book. */
+const allowFn = (books) => {
+  const set = books?.length ? new Set(books) : null;
+  return (b) => !set || set.has(b);
+};
+
+/** Best price per outcome using only allowed books. */
+function bestAllowed(group, allowed) {
+  return Object.fromEntries(group.outcomes.map((o) => {
+    let best = null;
+    for (const [book, p] of Object.entries(group.books)) {
+      if (!allowed(book) || !p[o]) continue;
+      if (!best || p[o].price > best.price) best = { book, price: p[o].price };
+    }
+    return [o, best];
+  }));
+}
+
 const isComplete = (prices, outcomes) => prices && outcomes.every((o) => prices[o]);
 
 /** Fair probabilities for a market from the sharp books (averaged), falling back to consensus. */
@@ -92,20 +110,19 @@ const baseInfo = (event, group) => ({
   market: group.market, line: group.line, marketLabel: marketLabel(group.market, group.line),
 });
 
-export function findArbitrage(events, { minProfitPct = 0, totalStake = 100, excludeBooks = [] } = {}) {
+/**
+ * Arbitrage: if the best implied probabilities across your books sum to < 100%, staking every
+ * side in proportion to 1/price returns the same payout whatever happens.
+ * `books` = the books you can bet at (legs only come from these).
+ */
+export function findArbitrage(events, { minProfitPct = 0, totalStake = 100, books = null } = {}) {
   const out = [];
-  const excluded = new Set(excludeBooks);
+  const allowed = allowFn(books);
   for (const ev of events) {
     if (ev.status === 'final') continue;
     for (const g of groupMarkets(ev)) {
-      const legs = g.outcomes.map((o) => {
-        let best = null;
-        for (const [book, p] of Object.entries(g.books)) {
-          if (excluded.has(book) || !p[o]) continue;
-          if (!best || p[o].price > best.price) best = { book, price: p[o].price };
-        }
-        return best && { outcome: o, ...best };
-      });
+      const best = bestAllowed(g, allowed);
+      const legs = g.outcomes.map((o) => best[o] && { outcome: o, ...best[o] });
       if (legs.some((l) => !l)) continue;
       const prices = legs.map((l) => l.price);
       const h = hold(prices);
@@ -130,18 +147,18 @@ export function findArbitrage(events, { minProfitPct = 0, totalStake = 100, excl
 
 export function findPositiveEV(events, {
   sharpBooks = ['pinnacle'], minEvPct = 1, method = 'multiplicative', fallback = 'consensus',
-  bankroll = 1000, kellyFraction = 0.25, maxOdds = 10, excludeBooks = [],
+  bankroll = 1000, kellyFraction = 0.25, maxOdds = 10, books = null,
 } = {}) {
   const out = [];
   const sharp = new Set(sharpBooks);
-  const excluded = new Set(excludeBooks);
+  const allowed = allowFn(books);
   for (const ev of events) {
     if (ev.status === 'final') continue;
     for (const g of groupMarkets(ev)) {
       const fair = fairProbabilities(g, sharpBooks, method, fallback);
       if (!fair) continue;
       for (const [book, prices] of Object.entries(g.books)) {
-        if (sharp.has(book) || excluded.has(book)) continue;
+        if (sharp.has(book) || !allowed(book)) continue; // sharp books are the reference, never a bet
         for (const o of g.outcomes) {
           const p = prices[o];
           if (!p || p.price > maxOdds) continue;
@@ -179,20 +196,70 @@ function normCdf(x) {
     * Math.exp(-(x * x) / 2);
   return x >= 0 ? (1 + y) / 2 : (1 - y) / 2;
 }
-/** Rough probability that a normally-distributed result lands strictly inside (lo, hi), centred on the midpoint. */
-export function middleHitProb(sport, market, lo, hi) {
-  const s = SIGMA[sport]?.[market] ?? 10;
-  const w = (hi - lo) / 2;
-  return Math.max(0, normCdf(w / s) - normCdf(-w / s));
+/**
+ * Middle between leg A ("result > lo", e.g. Over lo / Home +x) and leg B ("result < hi", Under hi / Away −y).
+ * Final scores are integers, so we sum over each whole-number result in [lo, hi]:
+ *   strictly inside → both legs win;  result == lo → A pushes, B wins;  result == hi → A wins, B pushes.
+ * The result is modelled as N(centre, σ) discretised to integers. `centre` should come from the market
+ * (see marketCentre); it defaults to the midpoint of the two lines.
+ */
+export function evaluateMiddle(sport, market, lo, hi, priceA, priceB, totalStake = 100, centre = (lo + hi) / 2) {
+  const sigma = SIGMA[sport]?.[market] ?? 10;
+  const c = centre;
+  const sA = (totalStake * priceB) / (priceA + priceB), sB = totalStake - sA;
+  const miss = sA * priceA - totalStake;
+  let ev = miss, hitProb = 0, pushProb = 0, best = miss;
+  for (let k = Math.ceil(lo); k <= Math.floor(hi); k++) {
+    const pk = normCdf((k + 0.5 - c) / sigma) - normCdf((k - 0.5 - c) / sigma);
+    let profit;
+    if (k > lo && k < hi) { profit = sA * priceA + sB * priceB - totalStake; hitProb += pk; }
+    else if (k === lo) { profit = sA + sB * priceB - totalStake; pushProb += pk; }
+    else { profit = sA * priceA + sB - totalStake; pushProb += pk; }
+    ev += pk * (profit - miss);
+    best = Math.max(best, profit);
+  }
+  return { stakeA: round(sA), stakeB: round(sB), profitIfMiss: round(miss), profitIfHit: round(best), hitProb, pushProb, expectedProfit: ev };
 }
 
-export function findMiddles(events, { minWidth = 0.5, totalStake = 100, minEvPct = -2 } = {}) {
+function normInv(p) {
+  let lo = -8, hi = 8;
+  for (let i = 0; i < 60; i++) { const m = (lo + hi) / 2; if (normCdf(m) < p) lo = m; else hi = m; }
+  return (lo + hi) / 2;
+}
+
+/**
+ * Where the market expects the result (final margin for spreads, combined score for totals), from the
+ * no-vig price of the most widely quoted line: P(result > L) = p  ⇒  centre = L − σ·Φ⁻¹(1 − p).
+ */
+export function marketCentre(event, groups, market, sharpBooks = [], method = 'multiplicative') {
+  const sigma = SIGMA[event.sport]?.[market] ?? 10;
+  const main = groups.filter((g) => g.market === market).sort((a, b) => Object.keys(b.books).length - Object.keys(a.books).length)[0];
+  if (!main) return null;
+  let probs = fairProbabilities(main, sharpBooks, method, 'consensus')?.probs;
+  if (!probs) { // thin market: de-vig the best available prices
+    if (main.outcomes.some((o) => !main.best[o])) return null;
+    const d = devig(main.outcomes.map((o) => main.best[o].price), method);
+    probs = Object.fromEntries(main.outcomes.map((o, i) => [o, d[i]]));
+  }
+  const [L, p] = market === 'totals' ? [main.line, probs.over] : [-main.line, probs.home];
+  return L - sigma * normInv(1 - Math.min(0.999, Math.max(0.001, p)));
+}
+
+/** Probability that an integer result lands strictly inside (lo, hi). */
+export function middleHitProb(sport, market, lo, hi) {
+  return evaluateMiddle(sport, market, lo, hi, 2, 2).hitProb;
+}
+
+export function findMiddles(events, { minWidth = 0.5, totalStake = 100, minEvPct = -2, books = null, sharpBooks = [], method = 'multiplicative' } = {}) {
   const out = [];
+  const allowed = allowFn(books);
   for (const ev of events) {
     if (ev.status === 'final') continue;
     const groups = groupMarkets(ev);
     for (const market of ['totals', 'spreads']) {
-      const gs = groups.filter((g) => g.market === market);
+      const centre = marketCentre(ev, groups, market, sharpBooks, method);
+      if (centre == null) continue;
+      const gs = groups.filter((g) => g.market === market).map((g) => ({ ...g, best: bestAllowed(g, allowed) }));
       for (const ga of gs) for (const gb of gs) {
         // totals: Over ga.line + Under gb.line with gb.line > ga.line
         // spreads: Home +ga.line + Away −gb.line with ga.line > gb.line
@@ -201,8 +268,10 @@ export function findMiddles(events, { minWidth = 0.5, totalStake = 100, minEvPct
         const [oa, ob] = market === 'totals' ? ['over', 'under'] : ['home', 'away'];
         const a = ga.best[oa], b = gb.best[ob];
         if (!a || !b || a.book === b.book) continue;
-        const pHit = middleHitProb(ev.sport, market, 0, width);
-        const m = middle(a.price, b.price, totalStake, pHit);
+        // map both markets onto "result > lo" (leg A) and "result < hi" (leg B)
+        const [lo, hi] = market === 'totals' ? [ga.line, gb.line] : [-ga.line, -gb.line];
+        const m = evaluateMiddle(ev.sport, market, lo, hi, a.price, b.price, totalStake, centre);
+        if (m.hitProb === 0 && m.pushProb === 0) continue; // no whole-number result in between
         const evPct = (m.expectedProfit / totalStake) * 100;
         if (evPct < minEvPct) continue;
         out.push({
@@ -215,7 +284,7 @@ export function findMiddles(events, { minWidth = 0.5, totalStake = 100, minEvPct
             { book: b.book, price: b.price, label: outcomeLabel(ev, market, gb.line, ob), stake: m.stakeB },
           ],
           profitIfMiss: m.profitIfMiss, profitIfHit: m.profitIfHit,
-          hitProb: round(pHit * 100, 2), evPct: round(evPct, 2),
+          hitProb: round(m.hitProb * 100, 2), pushProb: round(m.pushProb * 100, 2), evPct: round(evPct, 2),
         });
       }
     }
@@ -223,17 +292,21 @@ export function findMiddles(events, { minWidth = 0.5, totalStake = 100, minEvPct
   return out.sort((a, b) => b.evPct - a.evPct);
 }
 
-export function findLowHolds(events, { maxHoldPct = 2, limit = 200 } = {}) {
+export function findLowHolds(events, { maxHoldPct = 2, limit = 200, books = null } = {}) {
   const out = [];
+  const allowed = allowFn(books);
   for (const ev of events) {
     if (ev.status === 'final') continue;
     for (const g of groupMarkets(ev)) {
-      if (g.bestHold == null || g.bestHold * 100 > maxHoldPct) continue;
+      const best = bestAllowed(g, allowed);
+      if (g.outcomes.some((o) => !best[o])) continue;
+      const h = hold(g.outcomes.map((o) => best[o].price));
+      if (h * 100 > maxHoldPct) continue;
       out.push({
         id: `hold:${ev.id}:${g.key}`,
         ...baseInfo(ev, g),
-        holdPct: round(g.bestHold * 100, 3),
-        legs: g.outcomes.map((o) => ({ outcome: o, label: outcomeLabel(ev, g.market, g.line, o), ...g.best[o] })),
+        holdPct: round(h * 100, 3),
+        legs: g.outcomes.map((o) => ({ outcome: o, label: outcomeLabel(ev, g.market, g.line, o), ...best[o] })),
       });
     }
   }

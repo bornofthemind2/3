@@ -2,19 +2,19 @@
 import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { SHARP_BOOKS } from './providers/books.js';
+import { SHARP_BOOKS, DEFAULT_MY_BOOKS, BOOKS } from './providers/books.js';
 
 export const DEFAULT_SETTINGS = {
   scanIntervalSec: 5,
   totalStake: 100,
   minArbPct: 0.25,
   minEvPct: 1.5,
-  minMiddleEvPct: -1,
+  minMiddleEvPct: 0.5,
   maxHoldPct: 2,
   sharpBooks: SHARP_BOOKS,
   devigMethod: 'multiplicative',
   kellyFraction: 0.25,
-  excludeBooks: [],
+  myBooks: DEFAULT_MY_BOOKS, // books you have accounts at — the only books you'll be told to bet
   oddsFormat: 'american',
   alerts: { enabled: true, webhookUrl: '', minArbPct: 1, minEvPct: 3 },
 };
@@ -86,7 +86,44 @@ export class Store {
     };
   }
 
-  addTransaction({ book, type, amount, note = '' }) {
+  /**
+   * Import deposits/withdrawals from a CSV statement you exported yourself (no account scraping).
+   * Header names are matched loosely: date|time, book|sportsbook, type|description, amount, note.
+   * If there is no book column, pass `book`. If there is no type, the sign of the amount decides.
+   * Rows already imported (same date, book, type, amount) are skipped, so re-importing is safe.
+   */
+  importCsv(csv, { book: defaultBook } = {}) {
+    const rows = parseCsv(String(csv ?? ''));
+    if (rows.length < 2) throw new HttpError(400, 'CSV needs a header row and at least one data row');
+    const header = rows[0].map((h) => h.trim().toLowerCase());
+    const col = (...names) => header.findIndex((h) => names.some((n) => h.includes(n)));
+    const ci = { date: col('date', 'time'), book: col('book', 'sportsbook', 'operator'), type: col('type', 'description', 'transaction'), amount: col('amount', 'value'), note: col('note', 'memo', 'reference') };
+    if (ci.amount < 0) throw new HttpError(400, 'CSV must have an "amount" column');
+    const seen = new Set(this.wallet.transactions.map((t) => t.importKey).filter(Boolean));
+    const result = { imported: 0, skipped: 0, errors: [] };
+    rows.slice(1).forEach((r, i) => {
+      if (r.every((c) => !c.trim())) return;
+      const line = i + 2;
+      const book = resolveBook(ci.book >= 0 ? r[ci.book] : defaultBook);
+      const raw = Number(String(r[ci.amount] ?? '').replace(/[$,\s]/g, '').replace(/^\((.*)\)$/, '-$1'));
+      if (!book) return result.errors.push(`line ${line}: unknown or missing book`);
+      if (!Number.isFinite(raw) || raw === 0) return result.errors.push(`line ${line}: bad amount`);
+      const t = (ci.type >= 0 ? r[ci.type] : '').toLowerCase();
+      const type = /withdraw|cash ?out|payout/.test(t) ? 'withdrawal' : /deposit/.test(t) ? 'deposit' : /adjust|balance/.test(t) ? 'adjustment' : raw < 0 ? 'withdrawal' : 'deposit';
+      const date = ci.date >= 0 ? r[ci.date].trim() : '';
+      const importKey = `${date}|${book}|${type}|${Math.abs(raw)}`;
+      if (seen.has(importKey)) { result.skipped++; return; }
+      seen.add(importKey);
+      const tx = this.addTransaction({ book, type, amount: type === 'adjustment' ? raw : Math.abs(raw), note: (ci.note >= 0 ? r[ci.note] : '') || `CSV import ${date}`.trim() }, false);
+      tx.importKey = importKey;
+      if (date && !Number.isNaN(Date.parse(date))) tx.at = new Date(date).toISOString();
+      result.imported++;
+    });
+    this.save();
+    return result;
+  }
+
+  addTransaction({ book, type, amount, note = '' }, persist = true) {
     amount = Number(amount);
     if (!book || !['deposit', 'withdrawal', 'adjustment'].includes(type) || !Number.isFinite(amount)) {
       throw new HttpError(400, 'book, type (deposit|withdrawal|adjustment) and numeric amount are required');
@@ -95,7 +132,7 @@ export class Store {
     this.wallet.balances[book] = r2((this.wallet.balances[book] ?? 0) + delta);
     const tx = { id: randomUUID(), at: new Date().toISOString(), book, type, amount: Math.abs(amount), delta, note };
     this.wallet.transactions.push(tx);
-    this.save();
+    if (persist) this.save();
     return tx;
   }
 
@@ -166,3 +203,27 @@ export class HttpError extends Error {
 }
 
 const r2 = (x) => Math.round(x * 100) / 100;
+
+function resolveBook(v) {
+  const s = String(v ?? '').trim().toLowerCase();
+  if (!s) return null;
+  const norm = (x) => x.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const hit = BOOKS.find((b) => b.id === s || norm(b.name) === norm(s) || b.oddsApiKey === s);
+  return hit?.id ?? (/^[a-z0-9_]+$/.test(s) ? s : null);
+}
+
+/** Minimal RFC-4180 CSV parser (quoted fields, escaped quotes, CRLF). */
+export function parseCsv(text) {
+  const rows = []; let row = [], cell = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; } else if (c === '"') q = false; else cell += c;
+    } else if (c === '"') q = true;
+    else if (c === ',') { row.push(cell); cell = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
+    else cell += c;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows;
+}

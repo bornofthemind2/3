@@ -4,7 +4,7 @@ import { arbStakes, kelly, expectedValue, hedge, middle, promoConversion } from 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const money = (x) => (x < 0 ? '-$' : '$') + Math.abs(Number(x) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const pct = (x, dp = 2) => `${Number(x).toFixed(dp)}%`;
+const pct = (x, dp = 2) => { const v = Number(x); return `${(Math.abs(v) < 0.5 / 10 ** dp ? 0 : v).toFixed(dp)}%`; };
 
 const state = {
   tab: localGet('tab') || 'arbs',
@@ -96,7 +96,7 @@ const views = {
         </div>
         <table class="legs">${m.legs.map((l) => `<tr><td>${esc(l.label)}</td><td class="book">${esc(bookName(l.book))}</td><td class="num">${odds(l.price)}</td><td class="num">${money(l.stake)}</td></tr>`).join('')}</table>
         <div class="card-foot">
-          <span>Miss <b class="${m.profitIfMiss >= 0 ? 'pos' : 'negv'}">${money(m.profitIfMiss)}</b> · Hit <b class="pos">${money(m.profitIfHit)}</b> · est. hit ${pct(m.hitProb, 1)}</span>
+          <span>Miss <b class="${m.profitIfMiss >= 0 ? 'pos' : 'negv'}">${money(m.profitIfMiss)}</b> · Hit <b class="pos">${money(m.profitIfHit)}</b> · est. hit ${pct(m.hitProb, 1)}${m.pushProb ? ` + push ${pct(m.pushProb, 1)}` : ''}</span>
           <button class="small" data-log='${esc(JSON.stringify({ kind: 'middle', event: m.event, market: m.marketLabel, legs: m.legs }))}'>Log bets</button>
         </div>
       </div>`).join('')}</div>`;
@@ -122,7 +122,8 @@ const views = {
     if (state.oddsStatus) p.set('status', state.oddsStatus);
     const events = await api(`/api/odds?${p}`);
     const bookFilter = $('#f-book').value;
-    const books = Object.keys(state.books).filter((b) => !bookFilter || b === bookFilter);
+    const mine = state.settings.myBooks, sharp = state.settings.sharpBooks;
+    const books = [...mine, ...sharp.filter((b) => !mine.includes(b))].filter((b) => !bookFilter || b === bookFilter || sharp.includes(b));
     const controls = `<div class="row" style="margin-bottom:10px;align-items:center">
       <div class="toolbar" style="padding:0">
         ${['h2h', 'spreads', 'totals'].map((m) => `<button class="${state.oddsMarket === m ? 'primary' : 'ghost'}" data-market="${m}">${{ h2h: 'Moneyline', spreads: 'Spread', totals: 'Total' }[m]}</button>`).join('')}
@@ -145,7 +146,8 @@ const views = {
           ${books.map((b) => {
             const q = m.books[b]?.[o];
             if (!q) return '<td class="price sub">—</td>';
-            const isBest = m.best[o]?.book === b || m.best[o]?.price === q.price;
+            const bestMine = Math.max(...mine.map((x) => m.books[x]?.[o]?.price ?? 0));
+            const isBest = !sharp.includes(b) && q.price === bestMine;
             const key = `${e.id}|${m.key}|${b}|${o}`;
             const old = state.lastPrices.get(key);
             state.lastPrices.set(key, q.price);
@@ -156,14 +158,14 @@ const views = {
       }));
     }
     return controls + `<div class="table-wrap"><table class="grid">
-      <tr><th class="left">Game</th><th class="left">Selection</th><th>Hold</th>${books.map((b) => `<th>${esc(bookName(b))}</th>`).join('')}</tr>
+      <tr><th class="left">Game</th><th class="left">Selection</th><th>Hold</th>${books.map((b) => `<th title="${sharp.includes(b) ? 'Sharp reference — fair value only' : 'Your book'}">${esc(bookName(b))}${sharp.includes(b) ? ' <span class="tag">ref</span>' : ''}</th>`).join('')}</tr>
       ${rows.join('')}</table></div>`;
   },
 
   async wallet() {
     const w = await api('/api/wallet');
     const t = w.totals;
-    const bookIds = [...new Set([...Object.keys(state.books), ...Object.keys(w.balances)])];
+    const bookIds = [...new Set([...state.settings.myBooks, ...Object.keys(w.balances)])];
     return `
       <div class="stats">
         ${stat('Bankroll', money(t.bankroll))}${stat('Cash in books', money(t.balance))}${stat('Open exposure', money(t.exposure))}
@@ -189,6 +191,16 @@ const views = {
             </div>
             <label class="field">Note<input name="note" placeholder="optional"></label>
             <button class="primary">Record</button>
+          </form>
+          <h2 style="margin-top:18px">Import a statement (CSV)</h2>
+          <form id="import-form">
+            <p class="sub">Export your transaction history from the sportsbook’s website and drop it here. Columns are matched loosely (date, book, type, amount, note); if the file has no book column, pick one. Duplicate rows are skipped.</p>
+            <div class="row">
+              <label class="field">File<input type="file" name="file" accept=".csv,text/csv"></label>
+              <label class="field">Book (if not in file)<select name="book"><option value="">— from file —</option>${bookIds.map((b) => `<option value="${esc(b)}">${esc(bookName(b))}</option>`).join('')}</select></label>
+            </div>
+            <label class="field">…or paste CSV<textarea name="csv" rows="3" style="background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px" placeholder="date,book,type,amount&#10;2026-10-01,DraftKings,Deposit,500"></textarea></label>
+            <button class="ghost">Import</button>
           </form>
           <h2 style="margin-top:18px">Recent transactions</h2>
           ${w.transactions.length ? `<div class="table-wrap"><table class="grid"><tr><th class="left">When</th><th class="left">Book</th><th>Type</th><th>Change</th><th class="left">Note</th></tr>
@@ -234,11 +246,12 @@ const views = {
           <label class="field">Kelly fraction<input name="kellyFraction" type="number" step="0.05" min="0" max="1" value="${s.kellyFraction}"></label>
         </div>
         <h2>Sharp books (fair-value source)</h2>
-        <div class="row">${bookIds.map((b) => `<label class="chk"><input type="checkbox" name="sharp" value="${b}" ${s.sharpBooks.includes(b) ? 'checked' : ''}>${esc(bookName(b))}</label>`).join('')}</div>
+        <p class="sub">Their no-vig price is the “true” probability each bet is measured against. They are never suggested as a bet.</p>
+        <div class="row">${bookIds.filter((b) => state.books[b]?.sharp).map((b) => `<label class="chk"><input type="checkbox" name="sharp" value="${b}" ${s.sharpBooks.includes(b) ? 'checked' : ''}>${esc(bookName(b))}</label>`).join('')}</div>
       </section>
-      <section class="card"><h2>Excluded books</h2>
-        <p class="sub">Books you can’t use (not in your state, limited, no account). They are skipped for every opportunity.</p>
-        <div class="row">${bookIds.map((b) => `<label class="chk"><input type="checkbox" name="exclude" value="${b}" ${s.excludeBooks.includes(b) ? 'checked' : ''}>${esc(bookName(b))}</label>`).join('')}</div>
+      <section class="card"><h2>My books</h2>
+        <p class="sub">The books you have funded accounts at. Arbs, +EV, middles and low holds only ever tell you to bet at these — untick any that have limited you. Sharp books are used for fair value only and can’t be selected.</p>
+        <div class="row">${bookIds.filter((b) => !state.books[b]?.sharp).map((b) => `<label class="chk"><input type="checkbox" name="mybook" value="${b}" ${s.myBooks.includes(b) ? 'checked' : ''}>${esc(bookName(b))}</label>`).join('')}</div>
         <h2 style="margin-top:18px">Alerts &amp; automation</h2>
         <label class="chk"><input type="checkbox" name="alertsEnabled" ${s.alerts.enabled ? 'checked' : ''}> Alert on new opportunities (in-app + browser notification + webhook)</label>
         <div class="row" style="margin-top:8px">
@@ -472,6 +485,16 @@ document.addEventListener('submit', async (e) => {
   if (f.id === 'tx-form') {
     e.preventDefault();
     try { await api('/api/wallet/transactions', { method: 'POST', body: Object.fromEntries(new FormData(f)) }); render(true); } catch (err) { toast(esc(err.message), 'err'); }
+  } else if (f.id === 'import-form') {
+    e.preventDefault();
+    const fd = new FormData(f);
+    const file = fd.get('file');
+    const csv = file && file.size ? await file.text() : fd.get('csv');
+    try {
+      const r = await api('/api/wallet/import', { method: 'POST', body: { csv, book: fd.get('book') || undefined } });
+      toast(`Imported ${r.imported} transaction(s)${r.skipped ? `, ${r.skipped} duplicate(s) skipped` : ''}${r.errors.length ? `<br><span class="sub">${esc(r.errors.slice(0, 3).join('; '))}</span>` : ''}`, r.errors.length ? 'err' : '');
+      render(true);
+    } catch (err) { toast(esc(err.message), 'err'); }
   } else if (f.dataset.setbal) {
     e.preventDefault();
     const v = new FormData(f).get('v');
@@ -485,7 +508,7 @@ document.addEventListener('submit', async (e) => {
     const patch = {
       scanIntervalSec: n('scanIntervalSec'), totalStake: n('totalStake'), minArbPct: n('minArbPct'), minEvPct: n('minEvPct'),
       minMiddleEvPct: n('minMiddleEvPct'), maxHoldPct: n('maxHoldPct'), devigMethod: fd.get('devigMethod'), kellyFraction: n('kellyFraction'),
-      sharpBooks: fd.getAll('sharp'), excludeBooks: fd.getAll('exclude'),
+      sharpBooks: fd.getAll('sharp'), myBooks: fd.getAll('mybook'),
       alerts: { enabled: fd.get('alertsEnabled') === 'on', minArbPct: n('alertArb'), minEvPct: n('alertEv'), webhookUrl: fd.get('webhookUrl') },
     };
     try { state.settings = await api('/api/settings', { method: 'PUT', body: patch }); toast('Settings saved.'); } catch (err) { toast(esc(err.message), 'err'); }
@@ -497,7 +520,7 @@ document.addEventListener('submit', async (e) => {
   const [books, settings] = await Promise.all([api('/api/books'), api('/api/settings')]);
   state.books = Object.fromEntries(books.map((b) => [b.id, b]));
   state.settings = settings;
-  $('#f-book').innerHTML += books.map((b) => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
+  $('#f-book').innerHTML += books.filter((b) => settings.myBooks.includes(b.id)).map((b) => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
   $('#f-format').value = localGet('format') || settings.oddsFormat;
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === state.tab));
   await render(true);

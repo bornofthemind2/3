@@ -146,7 +146,7 @@ export class SimulatedProvider {
   /** Have `book` (re)quote `ev`. Books sometimes hang a line ½ point off the market → middles. */
   quote(ev, book, initial = false) {
     const st = (ev.bookState[book.id] ??= {
-      bias: this.gauss() * (book.sharp ? 0.004 : 0.012),
+      bias: this.gauss() * (book.sharp ? 0.004 : 0.02),
       spreadShift: book.sharp ? 0 : this.pick([0, 0, 0, 0, -0.5, 0.5, -1, 1]),
       totalShift: book.sharp ? 0 : this.pick([0, 0, 0, 0, -0.5, 0.5]),
       offers: [],
@@ -158,7 +158,7 @@ export class SimulatedProvider {
     const fair = this.fairMarkets(ev, spreadLine, totalLine);
     const t = new Date(this.now()).toISOString();
     const offers = [];
-    const mispriced = !book.sharp && !initial && this.rand() < 0.03;
+    const mispriced = !book.sharp && !initial && this.rand() < 0.07;
     for (const [market, probs] of Object.entries(fair)) {
       const outs = Object.keys(probs);
       const vig = book.vig * (outs.length === 3 ? 1.4 : 1) * (market === 'h2h' ? 1 : 1.05);
@@ -167,7 +167,7 @@ export class SimulatedProvider {
       const boostIdx = mispriced && market === this.pick(['h2h', 'spreads', 'totals']) ? Math.floor(this.rand() * outs.length) : -1;
       outs.forEach((o, i) => {
         let price = 1 / ((skewed[i] / s) * (1 + vig));
-        if (i === boostIdx) price = 1 + (price - 1) * (1.03 + this.rand() * 0.05); // mispriced line
+        if (i === boostIdx) price = 1 + (price - 1) * (1.04 + this.rand() * 0.07); // mispriced line
         const line = market === 'h2h' ? null : market === 'spreads' ? spreadLine : totalLine;
         offers.push({ book: book.id, market, line, outcome: o, price: roundPrice(price), updated: t });
       });

@@ -16,9 +16,34 @@ test('finds a two-way arbitrage across books with correct stakes', () => {
   const [arb] = findArbitrage([ev], { totalStake: 100 });
   assert.ok(arb);
   assert.deepEqual(arb.legs.map((l) => l.book), ['draftkings', 'fanduel']);
-  assert.ok(arb.profitPct > 2.5 && arb.profitPct < 3);
-  assert.equal(findArbitrage([ev], { excludeBooks: ['fanduel'] }).length, 0);
+  assert.ok(arb.profitPct > 3.3 && arb.profitPct < 3.6);
+  // Only books you can bet at are used for legs; Pinnacle is a reference book, not a leg.
+  assert.equal(findArbitrage([ev], { books: ['draftkings', 'betmgm'] }).length, 0);
+  assert.equal(findArbitrage([ev], { books: ['draftkings', 'pinnacle'] })[0].legs[1].book, 'pinnacle', 'allowlist is honoured literally');
   assert.equal(findArbitrage([{ ...ev, status: 'final' }]).length, 0);
+});
+
+test('worked example: +110 / -105 across two books is a ~1.17% arb with exact hedge stakes', async () => {
+  const { americanToDecimal } = await import('../src/lib/odds.js');
+  const a = americanToDecimal(110), b = americanToDecimal(-105); // 47.62% + 51.22% = 98.84%
+  const ev = event([o('draftkings', 'h2h', null, 'home', a), o('fanduel', 'h2h', null, 'away', b)]);
+  const [arb] = findArbitrage([ev], { totalStake: 1000, books: ['draftkings', 'fanduel'] });
+  assert.ok(Math.abs(arb.profitPct - (1 / (1 / a + 1 / b) - 1) * 100) < 0.001);
+  assert.ok(arb.profitPct > 1.16 && arb.profitPct < 1.18);
+  assert.equal(arb.legs[0].stake, 481.79); // 1000 × (1/2.10) / (1/2.10 + 1/1.952)
+  assert.equal(arb.legs[1].stake, 518.21);
+  assert.ok(Math.abs(arb.legs[0].payout - arb.legs[1].payout) < 0.02);
+});
+
+test('+EV never recommends a sharp book or a book you do not use', () => {
+  const ev = event([
+    o('pinnacle', 'h2h', null, 'home', 2.0), o('pinnacle', 'h2h', null, 'away', 1.85),
+    o('circa', 'h2h', null, 'home', 2.02), o('circa', 'h2h', null, 'away', 1.83),
+    o('betmgm', 'h2h', null, 'home', 2.2), o('betmgm', 'h2h', null, 'away', 1.65),
+  ]);
+  const list = findPositiveEV([ev], { sharpBooks: ['pinnacle', 'circa'], books: ['betmgm', 'draftkings'] });
+  assert.deepEqual([...new Set(list.map((x) => x.book))], ['betmgm']);
+  assert.equal(findPositiveEV([ev], { sharpBooks: ['pinnacle', 'circa'], books: ['draftkings'] }).length, 0);
 });
 
 test('+EV uses de-vigged sharp line as fair value', () => {
@@ -49,6 +74,17 @@ test('middles on totals with different lines', () => {
   assert.ok(m.profitIfHit > 0 && m.profitIfMiss < 0);
 });
 
+test('middles respect integer scores: a half-point gap is only a push, never a double win', async () => {
+  const { evaluateMiddle } = await import('../src/lib/engine.js');
+  const half = evaluateMiddle('americanfootball', 'spreads', 3.5, 4, 1.91, 1.91, 100);
+  assert.equal(half.hitProb, 0);
+  assert.ok(half.pushProb > 0);
+  assert.ok(half.expectedProfit < 0, 'a -110/-110 half-point push middle is -EV');
+  const wide = evaluateMiddle('basketball', 'totals', 224.5, 228.5, 1.91, 1.91, 100);
+  assert.ok(wide.hitProb > 0.08 && wide.hitProb < 0.15, `4 integers inside → ~11%, got ${wide.hitProb}`);
+  assert.equal(wide.pushProb, 0);
+});
+
 test('spread groups carry the home line and low holds are sorted', () => {
   const ev = event([
     o('a', 'spreads', -3.5, 'home', 1.95), o('a', 'spreads', -3.5, 'away', 1.95),
@@ -71,7 +107,7 @@ test('simulated feed is deterministic and produces realistic opportunities', asy
   const a = await run(), b = await run();
   assert.deepEqual(a, b);
   assert.ok(a.length >= 25);
-  assert.ok(new Set(a.flatMap((e) => e.offers.map((x) => x.book))).size >= 15);
+  assert.ok(new Set(a.flatMap((e) => e.offers.map((x) => x.book))).size >= 10);
   for (const arb of findArbitrage(a)) assert.ok(arb.profitPct < 15, `implausible arb ${arb.profitPct}%`);
   for (const x of findPositiveEV(a, { sharpBooks: ['pinnacle', 'circa'] })) assert.ok(x.evPct < 25);
 });

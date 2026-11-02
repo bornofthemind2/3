@@ -1,6 +1,8 @@
-// Live odds via The Odds API (https://the-odds-api.com) — covers 70+ US/UK/EU/AU sportsbooks.
-// Enabled when ODDS_API_KEY is set. Each fetch costs (markets × regions) credits per sport, so the
-// scanner interval for this provider defaults to 60s.
+// Live odds via The Odds API (https://the-odds-api.com). Read-only odds feed — no sportsbook logins.
+// Enabled when ODDS_API_KEY is set. We request only the books you use plus the sharp reference books
+// (`bookmakers=` param; every 10 books bill like one region), so each fetch costs
+// ≈ markets × ceil(books / 10) credits per sport. The scanner polls this provider at most once a minute.
+import { BOOKS, fromOddsApiKey } from './books.js';
 
 const SPORT_MAP = {
   americanfootball_nfl: ['americanfootball', 'NFL'],
@@ -24,6 +26,7 @@ export function normalizeOddsApiEvent(raw) {
   };
   const offers = [];
   for (const bm of raw.bookmakers ?? []) {
+    const book = fromOddsApiKey[bm.key] ?? bm.key;
     for (const m of bm.markets ?? []) {
       if (!['h2h', 'spreads', 'totals'].includes(m.key)) continue;
       const homePoint = m.key === 'spreads' ? m.outcomes.find((o) => o.name === raw.home_team)?.point : null;
@@ -31,7 +34,7 @@ export function normalizeOddsApiEvent(raw) {
         const outcome = outcomeKey(m.key, o.name);
         if (!outcome) continue;
         const line = m.key === 'h2h' ? null : m.key === 'spreads' ? (homePoint ?? -o.point) : o.point;
-        offers.push({ book: bm.key, market: m.key, line, outcome, price: o.price, updated: m.last_update ?? bm.last_update });
+        offers.push({ book, market: m.key, line, outcome, price: o.price, updated: m.last_update ?? bm.last_update });
       }
     }
   }
@@ -43,12 +46,13 @@ export function normalizeOddsApiEvent(raw) {
 }
 
 export class TheOddsApiProvider {
-  constructor({ apiKey, sports = Object.keys(SPORT_MAP).slice(0, 6), regions = 'us,us2,uk,eu', markets = 'h2h,spreads,totals', fetchImpl = globalThis.fetch } = {}) {
+  /** `books()` returns our book ids to request (your books + sharp references). */
+  constructor({ apiKey, sports = Object.keys(SPORT_MAP).slice(0, 6), books = () => BOOKS.map((b) => b.id), markets = 'h2h,spreads,totals', fetchImpl = globalThis.fetch } = {}) {
     if (!apiKey) throw new Error('TheOddsApiProvider requires an apiKey');
     this.name = 'the-odds-api';
     this.apiKey = apiKey;
     this.sports = sports;
-    this.regions = regions;
+    this.books = books;
     this.markets = markets;
     this.fetchImpl = fetchImpl;
     this.prev = new Map();
@@ -58,7 +62,8 @@ export class TheOddsApiProvider {
   async fetch() {
     const results = await Promise.allSettled(this.sports.map(async (sport) => {
       const url = new URL(`https://api.the-odds-api.com/v4/sports/${sport}/odds`);
-      url.search = new URLSearchParams({ apiKey: this.apiKey, regions: this.regions, markets: this.markets, oddsFormat: 'decimal' });
+      const bookmakers = [...new Set(this.books())].map((id) => BOOKS.find((b) => b.id === id)?.oddsApiKey ?? id).join(',');
+      url.search = new URLSearchParams({ apiKey: this.apiKey, bookmakers, markets: this.markets, oddsFormat: 'decimal' });
       const res = await this.fetchImpl(url);
       if (!res.ok) throw new Error(`${sport}: HTTP ${res.status}`);
       this.remainingCredits = res.headers.get('x-requests-remaining') ?? this.remainingCredits;

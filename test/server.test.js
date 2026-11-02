@@ -67,6 +67,24 @@ test('API: wallet deposits, bets, settlement and funding check', async () => {
   } finally { await app.close(); }
 });
 
+test('API: CSV statement import (dedupes, handles $ and parentheses)', async () => {
+  const app = await boot();
+  try {
+    const csv = 'Date,Sportsbook,Type,Amount,Note\n2026-10-01,DraftKings,Deposit,"$1,000.00",first\n2026-10-05,DraftKings,Withdrawal,(250.00),\n2026-10-06,Nowhere Book!,Deposit,5,\n';
+    let r = (await app.call('POST', '/api/wallet/import', { csv })).data;
+    assert.equal(r.imported, 2);
+    assert.equal(r.errors.length, 1);
+    assert.equal((await app.call('GET', '/api/wallet')).data.balances.draftkings, 750);
+    r = (await app.call('POST', '/api/wallet/import', { csv })).data;
+    assert.equal(r.imported, 0);
+    assert.equal(r.skipped, 2);
+    // per-book statement without a book column
+    r = (await app.call('POST', '/api/wallet/import', { csv: 'date,amount\n2026-10-02,200\n', book: 'fanduel' })).data;
+    assert.equal(r.imported, 1);
+    assert.equal((await app.call('GET', '/api/wallet')).data.balances.fanduel, 200);
+  } finally { await app.close(); }
+});
+
 test('API: settings and calculators', async () => {
   const app = await boot();
   try {

@@ -17,7 +17,11 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; cha
 export function createApp({ provider, store, scanner } = {}) {
   store ??= new Store(process.env.DATA_FILE ?? join(ROOT, 'data/state.json'));
   provider ??= process.env.ODDS_API_KEY
-    ? new TheOddsApiProvider({ apiKey: process.env.ODDS_API_KEY, sports: process.env.ODDS_SPORTS?.split(',') })
+    ? new TheOddsApiProvider({
+      apiKey: process.env.ODDS_API_KEY,
+      sports: process.env.ODDS_SPORTS?.split(','),
+      books: () => [...store.settings.myBooks, ...store.settings.sharpBooks],
+    })
     : new SimulatedProvider();
   scanner ??= new Scanner({ provider, store });
 
@@ -51,6 +55,7 @@ export function createApp({ provider, store, scanner } = {}) {
     ['GET', '/api/events/:id/history', ({ params }) => provider.getHistory(params.id)],
     ['GET', '/api/wallet', () => store.walletSummary()],
     ['POST', '/api/wallet/transactions', ({ body }) => store.addTransaction(body)],
+    ['POST', '/api/wallet/import', ({ body }) => store.importCsv(body.csv, { book: body.book })],
     ['PUT', '/api/wallet/balances/:book', ({ params, body }) => store.setBalance(params.book, body.balance)],
     ['POST', '/api/wallet/bets', ({ body }) => store.placeBets(body.legs ?? [body], body)],
     ['POST', '/api/wallet/bets/:id/settle', ({ params, body }) => store.settleBet(params.id, body.result)],
@@ -74,7 +79,7 @@ export function createApp({ provider, store, scanner } = {}) {
         }
         throw new HttpError(404, `No route for ${req.method} ${url.pathname}`);
       }
-      return serveStatic(url.pathname, res);
+      return await serveStatic(url.pathname, res);
     } catch (e) {
       const status = e.status ?? (e instanceof RangeError || e instanceof SyntaxError ? 400 : 500);
       if (status === 500) console.error(e);
